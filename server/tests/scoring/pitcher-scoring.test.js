@@ -46,8 +46,7 @@ describe('computePitcherScores', () => {
       SV: 0, HLD: 0, H: 150, ER: 60, HR: 18, SO: 190, BB: 40, G: 30, GS: 30,
     };
     const result = computePitcherScores([sp], weights, replacementLevel);
-    const expected_adj = -Math.min(result[0].raw_score * 3 / 7, 237 * 10 / 7 * 3 / 7) + 165;
-    expect(result[0].adjustment).toBeCloseTo(expected_adj, 1);
+    expect(result[0].adjustment).toBeCloseTo(19.90, 1);
   });
 
   it('computes adj_2020_value with dual-path valuation', () => {
@@ -56,10 +55,7 @@ describe('computePitcherScores', () => {
       SV: 0, HLD: 0, H: 150, ER: 60, HR: 18, SO: 190, BB: 40, G: 30, GS: 30,
     };
     const result = computePitcherScores([sp], weights, replacementLevel);
-    const raw = result[0].raw_score;
-    const sp_value = -Math.min(raw * 3 / 7, 237 * 10 / 7 * 3 / 7) + 215 + raw;
-    const rp_value = 0 + 71;
-    expect(result[0].adj_2020_value).toBeCloseTo(Math.max(sp_value, rp_value), 1);
+    expect(result[0].adj_2020_value).toBeCloseTo(513.90, 1);
   });
 
   it('handles zero IP without crashing', () => {

@@ -1,6 +1,4 @@
-function safeDivide(a, b) {
-  return b === 0 ? 0 : a / b;
-}
+import { safeDivide } from './utils.js';
 
 export function computePitcherScores(pitchers, weights, replacementLevel) {
   return pitchers.map(p => {

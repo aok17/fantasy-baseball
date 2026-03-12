@@ -1,6 +1,4 @@
-function safeDivide(a, b) {
-  return b === 0 ? 0 : a / b;
-}
+import { safeDivide } from './utils.js';
 
 const POSITION_COLUMNS = [
   'pos_espn_2025', 'pos_yahoo_2025', 'pos_espn_2024',
