@@ -189,6 +189,8 @@ Recomputes all scores whenever projections change or scoring config is edited. A
 
 3. **Position lookup:** Sourced from `batter_positions` table. The table stores up to 6 position columns representing different sources/years (e.g., ESPN 2024, ESPN 2025, Yahoo 2025, etc.). Fallback priority: use the first non-empty value scanning left to right (column order = recency priority). The first column is the most authoritative/recent source.
 
+   **Multi-position strings:** Position fields may contain comma-separated values (e.g., "OF, 2B"). For the scarcity adjustment, use the **first listed position** in the string (e.g., "OF, 2B" → OF → +40). The full multi-position string is preserved in the `position` column for display/filtering purposes.
+
 4. **Adj score** (stored in `adj_score`):
    `= raw_score + adjustment`
 
@@ -200,7 +202,11 @@ Recomputes all scores whenever projections change or scoring config is edited. A
 - Merge pitchers and batters into a single list
 - **Raw score** (`score` column) = `MAX(pitcher.raw_score, batter.raw_score)` — the higher raw score across pitcher/batter projections for this player
 - **Ranking value** (`adj_score` column) = `MAX(pitcher.adj_2020_value, batter.adj_score)` — the primary sort column, uses Adjusted 2020 Value for pitchers, Adj Score for batters
-- Additional columns: ESPN ADP, velocity delta (pitchers only, NULL for batters), per-game efficiency (`pts_per_appearance` for pitchers, `pts_per_game` for batters), value gap (combined rank - ESPN ADP rank)
+- **Position** (`position` column) = pitcher `display_position` if the player has pitcher scores, otherwise batter `position`. For dual-eligible players who appear in both, use the pitcher display_position.
+- **Rank** (`rank` column) = ordinal rank when ordering by `adj_score` DESC. Ties broken by `score` DESC, then alphabetical name. Stored as a column in the materialized table, recomputed on every rescore.
+- **Value gap** (`value_gap` column) = `rank - espn_adp`. Positive = drafted later than ADP (potential value), negative = overdrafted relative to ADP. NULL if no ESPN ADP data.
+- Additional columns: ESPN ADP, velocity delta (pitchers only, NULL for batters), per-game efficiency (`pts_per_appearance` for pitchers, `pts_per_game` for batters)
+- **ESPN projected_points:** Ingested into `espn_adp` table but not surfaced in combined_rankings or the UI in Phase 1. Stored for future use.
 
 ### Configuration
 
@@ -227,7 +233,7 @@ Rankings table plus draft-day controls:
 - **Toggle taken players** — hide/show drafted players
 - **My roster sidebar** — current picks organized by position
 - **Notes field** — inline editable per player, persisted to `player_notes` column in `draft_picks` table
-- **Multiple draft sessions** — support for multiple leagues
+- **Multiple draft sessions** — support for multiple leagues via a session selector dropdown at the top of the Draft view. "New Session" button creates a new session with a user-provided name (e.g., "Main League 2026"). The most recently created session is active by default. Switching sessions reloads the draft state for that session.
 
 Draft state persisted to `draft_picks` table. Browser-safe — close and reopen without losing state.
 
@@ -279,13 +285,15 @@ statcast_pitches (
   -- additional movement/approach columns as needed
 )
 
--- Velocity delta view
--- SELECT player_name,
---   MAX(CASE WHEN season=2024 AND season_type='regular' THEN velocity END) as v_2024,
---   MAX(CASE WHEN season=2025 AND season_type='spring' THEN velocity END) as v_2025,
---   (v_2025 - v_2024) as delta
--- FROM statcast_pitches GROUP BY player_name
--- HAVING delta < 10
+-- Velocity delta view (pseudocode — adapt for valid SQLite syntax)
+-- SELECT player_name, v_2024, v_2025, delta FROM (
+--   SELECT player_name,
+--     MAX(CASE WHEN season=2024 AND season_type='regular' THEN velocity END) as v_2024,
+--     MAX(CASE WHEN season=2025 AND season_type='spring' THEN velocity END) as v_2025,
+--     (MAX(CASE WHEN season=2025 AND season_type='spring' THEN velocity END)
+--      - MAX(CASE WHEN season=2024 AND season_type='regular' THEN velocity END)) as delta
+--   FROM statcast_pitches GROUP BY player_name
+-- ) WHERE delta IS NOT NULL AND delta < 10
 
 -- Computed scores (materialized by scoring engine)
 pitcher_scores (
@@ -307,6 +315,7 @@ batter_scores (
 
 combined_rankings (
   id INTEGER PRIMARY KEY,
+  rank INT,              -- ordinal rank by adj_score DESC, ties broken by score DESC then name ASC
   name TEXT, team TEXT, position TEXT,
   score REAL,            -- raw score (max of pitcher/batter)
   adj_score REAL,        -- ranking value (pitcher adj_2020_value or batter adj_score)
