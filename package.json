@@ -1,0 +1,5 @@
+{
+  "name": "fantasy-baseball",
+  "private": true,
+  "workspaces": ["server", "client"]
+}
