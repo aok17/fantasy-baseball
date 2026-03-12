@@ -56,36 +56,50 @@ Three independent scrapers, each writing to SQLite. All triggered via UI buttons
 
 ### FanGraphs Projections (authenticated)
 
-- **Method:** Log in with stored credentials, download Steamer/ZiPS projection CSV exports
+- **Projection system:** User selects one system (Steamer or ZiPS) in Settings. Only one system is ingested at a time — no averaging. Default: Steamer.
+- **Credential storage:** Stored in a `.env` file in the project root (`FANGRAPHS_EMAIL`, `FANGRAPHS_PASSWORD`). Never committed to git (added to `.gitignore`).
+- **Authentication flow:**
+  1. POST to `https://www.fangraphs.com/api/login` with JSON body `{ email, password }` to obtain a session cookie
+  2. Use the session cookie to GET the CSV export URLs:
+     - Pitchers: `https://www.fangraphs.com/api/projections?type={projection_system}&stats=pit&pos=all&team=&lg=all&players=0&download=true`
+     - Batters: same URL with `stats=bat`
+     - `{projection_system}` is substituted from the user's Settings selection: `steamer` or `zips`
+  3. Parse the returned CSV
 - **Output tables:**
-  - `pitchers_raw` (~5700 rows) — columns: name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB, WHIP, K/9, BB/9, ERA, FIP, WAR, RA9-WAR, player_id
+  - `pitchers_raw` (~5700 rows) — columns: name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB, WHIP, K9, BB9, ERA, FIP, WAR, RA9WAR, player_id
   - `batters_raw` (~4500 rows) — columns: name, team, G, PA, AB, H, 2B, 3B, HR, R, RBI, BB, SO, HBP, SB, CS, AVG, OBP, SLG, OPS, wOBA, wRC, BsR, Fld, Off, Def, WAR, player_id
 - **Trigger:** "Refresh Projections" button
 
 ### Baseball Savant / Statcast (public CSV)
 
-- **Method:** Public CSV export API, no auth required
-- **Output table:** `statcast_pitches` — one row per pitcher-pitch-type combo, columns include: player_id, player_name, pitch_type, velocity, spin_rate, whiff%, barrel%, xwoba, plus all movement/approach metrics
-- **Derived view:** `pitcher_velocity` — computes velocity delta between 2024 regular season max and 2025 spring training max per pitcher. Filters deltas > 10 mph as bad data.
+- **Method:** Public CSV export endpoint, no auth required. URL pattern:
+  `https://baseballsavant.mlb.com/leaderboard/custom?n=abs&stats=pit&qual=1&type=1&season=2024&month=0&game_type=R&min=10&csv=true`
+  Vary `season`, `game_type` (R=regular, ST=spring training).
+- **Output table:** `statcast_pitches` — one row per pitcher-pitch-type combo, columns include: player_id, player_name, pitch_type, velocity, spin_rate, whiff_pct, barrel_pct, xwoba, plus all movement/approach metrics
+- **Name format:** Statcast stores names as "Last, First" (e.g., "Verlander, Justin"). All Statcast names must be converted to "First Last" format before joining to other data sources. This conversion is applied during ingestion, before name reconciliation.
+- **Derived view:** `pitcher_velocity` — computes velocity delta (2025 ST max - 2024 regular max) per pitcher. Only retains rows where `delta < 10` mph (excludes positive deltas >= 10 as likely bad data or mismatched pitch types). Negative deltas (velocity drops) of any magnitude are preserved — this matches the original spreadsheet behavior where large velocity losses are meaningful signals, while large gains are likely data errors.
 - **Seasons fetched:** Regular season 2024, Spring Training 2025
 
 ### ESPN ADP (scraping)
 
-- **Method:** Scrape ESPN fantasy draft rankings page
+- **Method:** ESPN's fantasy API endpoint (JSON, not HTML scraping):
+  `https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/{year}/segments/0/leaguedefaults/3?view=kona_player_info`
+  where `{year}` is the current season year (stored in `app_config` table, key `season_year`). This returns JSON with player rankings, ADP, and projected points. No auth required for default league data.
+- **Fallback:** If the API endpoint changes or is unavailable, support CSV upload as a manual alternative.
 - **Output table:** `espn_adp` — columns: name, adp_rank, projected_points
 - **Joined to players** by name via `name_replacements` table
 
 ### Name Reconciliation
 
 - **Table:** `name_replacements` — maps alternate spellings to canonical names (e.g., "Pete Alonso" -> "Peter Alonso")
-- **Applied** as a preprocessing step before any cross-source joins
+- **Applied** as a preprocessing step before any cross-source joins (after format normalization — i.e., after Statcast "Last, First" → "First Last" conversion)
 - **Seeded** from the existing 61-row sheet, editable via the app
 
 ---
 
 ## Scoring Engine
 
-Recomputes all scores whenever projections change or scoring config is edited.
+Recomputes all scores whenever projections change or scoring config is edited. All division operations use safe guards: if the divisor is 0, the result is 0 (matching the spreadsheet's IFERROR behavior).
 
 ### Pitcher Scoring
 
@@ -103,27 +117,45 @@ Recomputes all scores whenever projections change or scoring config is edited.
 | SO   | 1.0           |
 | BB   | -0.5          |
 
-2. **Position classification:**
-   - SV > 0 → "CLOSER"
-   - GS == G → "SP"
-   - GS > 0 and GS < G → "SP, RP" (dual-eligible)
-   - GS == 0 → "RP"
+2. **Two separate position classifiers** (both are computed and stored):
 
-3. **Adjustment:**
+   **Scoring position** (used for adjustment calculation, stored in `scoring_position`):
+   - SV > 0 → "CLOSER"
+   - SV == 0 → "SP"
+   - This is a simple binary used only to select the adjustment formula.
+
+   **Display position** (used for UI filtering and eligibility, stored in `display_position`):
+   - GS == G → "SP"
+   - GS == 0 → "RP"
+   - GS > 0 and GS < G → "SP, RP" (dual-eligible)
+   - This is independent of saves. A closer with starts shows as "SP, RP" for display.
+
+3. **Adjustment** (stored in `adjustment` column, uses scoring_position):
    - Closers: flat -10
-   - SPs: `=-MIN(score * 3/7, replacement_level * 10/7 * 3/7) + 165`
+   - SPs: `=-MIN(raw_score * 3/7, replacement_level * 10/7 * 3/7) + 165`
    - Default replacement level: 237
 
-4. **Adjusted 2020 Value** (dual-path valuation):
+4. **Adj Score** (stored in `adj_score`):
+   `= raw_score + adjustment`
+
+5. **Adjusted 2020 Value** (stored separately in `adj_2020_value` — this is the primary ranking value used in Combined):
+
+   First compute component scores:
+   - `relief_pts = raw_score * (G - GS) / IP` (0 if IP == 0)
+   - `starting_pts = raw_score - relief_pts`
+
+   Then:
    ```
-   MAX(
+   adj_2020_value = MAX(
      -MIN(starting_pts * 3/7, replacement_level * 10/7 * 3/7) + 215 + starting_pts,
      relief_pts + 71
    )
    ```
-   Where:
-   - `starting_pts = raw_score - relief_pts`
-   - `relief_pts = raw_score * (G - GS) / IP`
+   This dual-path valuation takes the higher of: SP surplus value (with +215 constant and starting points), or RP value (with +71 floor). This is the value used in Combined rankings.
+
+6. **Per-appearance efficiency** (stored in `pts_per_appearance`):
+   `= raw_score / G` (0 if G == 0)
+   Note: divides by total games (G), not games started (GS). This matches the original spreadsheet (Pitcher Raw column AC = Y2/D2 where D=G). The name reflects the actual divisor.
 
 ### Batter Scoring
 
@@ -141,7 +173,7 @@ Recomputes all scores whenever projections change or scoring config is edited.
 | SO   | -1.0          |
 | SB   | 2.0           |
 
-2. **Position scarcity adjustment:**
+2. **Position scarcity adjustment** (applied at scoring stage, not at ingestion):
 
 | Position | Adjustment |
 |----------|-----------|
@@ -153,17 +185,26 @@ Recomputes all scores whenever projections change or scoring config is edited.
 | 1B       | +15       |
 | Other    | +10       |
 
-3. Position sourced from `batter_positions` table with multi-source fallback.
+   This uses the more granular Batter Projections scale from the original workbook. The simpler Batter Raw scale is not used.
+
+3. **Position lookup:** Sourced from `batter_positions` table. The table stores up to 6 position columns representing different sources/years (e.g., ESPN 2024, ESPN 2025, Yahoo 2025, etc.). Fallback priority: use the first non-empty value scanning left to right (column order = recency priority). The first column is the most authoritative/recent source.
+
+4. **Adj score** (stored in `adj_score`):
+   `= raw_score + adjustment`
+
+5. **Per-game efficiency** (stored in `pts_per_game`):
+   `= raw_score / G` (0 if G == 0)
 
 ### Combined Rankings
 
 - Merge pitchers and batters into a single list
-- Score = `MAX(pitcher_adj_value, batter_adj_points)`
-- Additional columns: ESPN ADP, velocity delta (pitchers), per-game efficiency, value gap (rank vs ESPN ADP)
+- **Raw score** (`score` column) = `MAX(pitcher.raw_score, batter.raw_score)` — the higher raw score across pitcher/batter projections for this player
+- **Ranking value** (`adj_score` column) = `MAX(pitcher.adj_2020_value, batter.adj_score)` — the primary sort column, uses Adjusted 2020 Value for pitchers, Adj Score for batters
+- Additional columns: ESPN ADP, velocity delta (pitchers only, NULL for batters), per-game efficiency (`pts_per_appearance` for pitchers, `pts_per_game` for batters), value gap (combined rank - ESPN ADP rank)
 
 ### Configuration
 
-All weights, position adjustments, and the replacement level threshold stored in `scoring_config` table. Editable via Settings page. Any change triggers full rescore.
+All weights, position adjustments, and the replacement level threshold stored in `scoring_config` and `position_adjustments` tables. Editable via Settings page. Any change triggers a full rescore of all players.
 
 ---
 
@@ -185,16 +226,17 @@ Rankings table plus draft-day controls:
 - **Mark as drafted** — click player to record as taken, pick number auto-increments
 - **Toggle taken players** — hide/show drafted players
 - **My roster sidebar** — current picks organized by position
-- **Notes field** — inline editable per player, persisted to SQLite
+- **Notes field** — inline editable per player, persisted to `player_notes` column in `draft_picks` table
 - **Multiple draft sessions** — support for multiple leagues
 
-Draft state persisted to `draft_picks` table (columns: player_name, pick_number, drafted_by, session_id, timestamp). Browser-safe — close and reopen without losing state.
+Draft state persisted to `draft_picks` table. Browser-safe — close and reopen without losing state.
 
 ### 3. Settings
 
 - Scoring weights editor (pitcher and batter weights in editable tables)
 - Position adjustment sliders
 - Replacement level threshold input
+- Projection system selector (Steamer / ZiPS)
 - Data source refresh buttons with progress indicators
 - Name replacements editor
 
@@ -208,29 +250,110 @@ Simple top nav bar with three links: Rankings, Draft, Settings.
 
 ```sql
 -- Raw projection data
-pitchers_raw (id, name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB, WHIP, K9, BB9, ERA, FIP, WAR, RA9WAR, player_id)
-batters_raw (id, name, team, G, PA, AB, H, 2B, 3B, HR, R, RBI, BB, SO, HBP, SB, CS, AVG, OBP, SLG, OPS, wOBA, wRC, BsR, Fld, Off, Def, WAR, player_id)
+pitchers_raw (
+  id INTEGER PRIMARY KEY,
+  name TEXT, team TEXT,
+  GS INT, G INT, IP REAL, W INT, L INT, QS INT, SV INT, HLD INT,
+  H INT, ER INT, HR INT, SO INT, BB INT,
+  WHIP REAL, K9 REAL, BB9 REAL, ERA REAL, FIP REAL, WAR REAL, RA9WAR REAL,
+  player_id TEXT
+)
 
--- Statcast
-statcast_pitches (id, player_id, player_name, season, season_type, pitch_type, velocity, spin_rate, whiff_pct, barrel_pct, xwoba, ...)
+batters_raw (
+  id INTEGER PRIMARY KEY,
+  name TEXT, team TEXT,
+  G INT, PA INT, AB INT, H INT, "2B" INT, "3B" INT, HR INT,
+  R INT, RBI INT, BB INT, SO INT, HBP INT, SB INT, CS INT,
+  AVG REAL, OBP REAL, SLG REAL, OPS REAL, wOBA REAL, wRC INT,
+  BsR REAL, Fld REAL, Off REAL, Def REAL, WAR REAL,
+  player_id TEXT
+)
+
+-- Statcast (names stored as "First Last" after ingestion normalization)
+statcast_pitches (
+  id INTEGER PRIMARY KEY,
+  player_id TEXT, player_name TEXT,
+  season INT, season_type TEXT,  -- 'regular' or 'spring'
+  pitch_type TEXT, velocity REAL, spin_rate REAL,
+  whiff_pct REAL, barrel_pct REAL, xwoba REAL
+  -- additional movement/approach columns as needed
+)
+
+-- Velocity delta view
+-- SELECT player_name,
+--   MAX(CASE WHEN season=2024 AND season_type='regular' THEN velocity END) as v_2024,
+--   MAX(CASE WHEN season=2025 AND season_type='spring' THEN velocity END) as v_2025,
+--   (v_2025 - v_2024) as delta
+-- FROM statcast_pitches GROUP BY player_name
+-- HAVING delta < 10
 
 -- Computed scores (materialized by scoring engine)
-pitcher_scores (id, name, team, position, raw_score, adjustment, adj_score, adj_2020_value, pts_per_start, starting_pts, relief_pts)
-batter_scores (id, name, team, position, raw_score, adjustment, adj_score, pts_per_game)
-combined_rankings (id, name, team, position, score, adj_score, espn_adp, velocity_delta, value_gap)
+pitcher_scores (
+  id INTEGER PRIMARY KEY,
+  name TEXT, team TEXT,
+  scoring_position TEXT,   -- 'CLOSER' or 'SP' (for adjustment calc)
+  display_position TEXT,   -- 'SP', 'RP', or 'SP, RP' (for UI)
+  raw_score REAL, adjustment REAL, adj_score REAL,
+  starting_pts REAL, relief_pts REAL, adj_2020_value REAL,
+  pts_per_appearance REAL
+)
+
+batter_scores (
+  id INTEGER PRIMARY KEY,
+  name TEXT, team TEXT, position TEXT,
+  raw_score REAL, adjustment REAL, adj_score REAL,
+  pts_per_game REAL
+)
+
+combined_rankings (
+  id INTEGER PRIMARY KEY,
+  name TEXT, team TEXT, position TEXT,
+  score REAL,            -- raw score (max of pitcher/batter)
+  adj_score REAL,        -- ranking value (pitcher adj_2020_value or batter adj_score)
+  espn_adp INT,
+  velocity_delta REAL,   -- NULL for batters
+  per_game_efficiency REAL,  -- pts_per_appearance for pitchers, pts_per_game for batters
+  value_gap INT          -- combined_rank - espn_adp_rank
+)
 
 -- Draft state
-draft_sessions (id, name, created_at)
-draft_picks (id, session_id, player_name, pick_number, drafted_by, timestamp)
+draft_sessions (id INTEGER PRIMARY KEY, name TEXT, created_at TEXT)
+draft_picks (
+  id INTEGER PRIMARY KEY,
+  session_id INT REFERENCES draft_sessions(id),
+  player_name TEXT, pick_number INT,
+  drafted_by TEXT,       -- 'me' or other team name
+  player_notes TEXT,     -- inline editable notes
+  timestamp TEXT
+)
 
 -- Configuration
-scoring_config (id, category, stat, weight)
-position_adjustments (id, position, adjustment)
-name_replacements (id, alt_name, canonical_name)
-batter_positions (id, name, position_source_1, position_source_2, ...)
+scoring_config (
+  id INTEGER PRIMARY KEY,
+  category TEXT,  -- 'pitcher' or 'batter'
+  stat TEXT,
+  weight REAL
+)
+position_adjustments (id INTEGER PRIMARY KEY, position TEXT, adjustment REAL)
+app_config (key TEXT PRIMARY KEY, value TEXT)  -- replacement_level, projection_system, etc.
+
+-- Name reconciliation
+name_replacements (id INTEGER PRIMARY KEY, alt_name TEXT, canonical_name TEXT)
+
+-- Position eligibility
+batter_positions (
+  id INTEGER PRIMARY KEY,
+  name TEXT,
+  pos_espn_2025 TEXT,    -- most authoritative (leftmost = highest priority)
+  pos_yahoo_2025 TEXT,
+  pos_espn_2024 TEXT,
+  pos_yahoo_2024 TEXT,
+  pos_fantrax_2025 TEXT,
+  pos_manual TEXT         -- user override
+)
 
 -- ESPN
-espn_adp (id, name, adp_rank, projected_points)
+espn_adp (id INTEGER PRIMARY KEY, name TEXT, adp_rank INT, projected_points REAL)
 ```
 
 ---
