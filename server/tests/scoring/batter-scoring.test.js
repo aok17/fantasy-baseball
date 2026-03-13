@@ -8,15 +8,16 @@ const weights = {
 const posAdj = { C: 70, OF: 40, '2B': 30, '3B': 25, SS: 20, '1B': 15, Other: 10 };
 
 describe('resolvePosition', () => {
-  it('returns positions from highest-priority source', () => {
+  it('returns positions from highest-priority source prefix', () => {
     const rows = [
       { source: 'yahoo_2025', position: 'SS' },
       { source: 'espn_2024', position: '2B' },
     ];
-    expect(resolvePosition(rows)).toBe('SS');
+    // espn has higher priority than yahoo
+    expect(resolvePosition(rows)).toBe('2B');
   });
 
-  it('returns espn_2025 over yahoo_2025 when both present', () => {
+  it('returns espn over yahoo when both present', () => {
     const rows = [
       { source: 'espn_2025', position: 'OF' },
       { source: 'espn_2025', position: '2B' },
@@ -27,8 +28,8 @@ describe('resolvePosition', () => {
 
   it('joins multiple positions from same source with comma', () => {
     const rows = [
-      { source: 'espn_2025', position: 'SS' },
-      { source: 'espn_2025', position: 'OF' },
+      { source: 'espn_2026', position: 'SS' },
+      { source: 'espn_2026', position: 'OF' },
     ];
     expect(resolvePosition(rows)).toBe('SS, OF');
   });
@@ -39,10 +40,19 @@ describe('resolvePosition', () => {
 
   it('prefers manual source above all others', () => {
     const rows = [
-      { source: 'espn_2025', position: 'OF' },
+      { source: 'espn_2026', position: 'OF' },
       { source: 'manual', position: 'SS' },
     ];
     expect(resolvePosition(rows)).toBe('SS');
+  });
+
+  it('picks newest year when multiple years exist for same prefix', () => {
+    const rows = [
+      { source: 'espn_2024', position: '2B' },
+      { source: 'espn_2026', position: 'SS' },
+      { source: 'espn_2026', position: 'OF' },
+    ];
+    expect(resolvePosition(rows)).toBe('SS, OF');
   });
 });
 
