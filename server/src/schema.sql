@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS combined_rankings (
   adj_score REAL,
   espn_adp INTEGER,
   velocity_delta REAL,
+  velo_prev REAL,
+  velo_curr REAL,
+  velo_n INTEGER,
   per_game_efficiency REAL,
   value_gap INTEGER
 );
@@ -121,15 +124,12 @@ CREATE TABLE IF NOT EXISTS name_replacements (
   canonical_name TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS batter_positions (
+CREATE TABLE IF NOT EXISTS position_eligibility (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  pos_espn_2025 TEXT,
-  pos_yahoo_2025 TEXT,
-  pos_espn_2024 TEXT,
-  pos_yahoo_2024 TEXT,
-  pos_fantrax_2025 TEXT,
-  pos_manual TEXT
+  source TEXT NOT NULL,
+  position TEXT NOT NULL,
+  UNIQUE(name, source, position)
 );
 
 CREATE TABLE IF NOT EXISTS espn_adp (
