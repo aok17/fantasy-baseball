@@ -1,13 +1,17 @@
 import { safeDivide } from './utils.js';
 
-const POSITION_COLUMNS = [
-  'pos_espn_2025', 'pos_yahoo_2025', 'pos_espn_2024',
-  'pos_yahoo_2024', 'pos_fantrax_2025', 'pos_manual',
+const SOURCE_PRIORITY = [
+  'manual', 'espn_2025', 'yahoo_2025', 'espn_2024',
+  'yahoo_2024', 'fantrax_2025',
 ];
 
-export function resolvePosition(positionRow) {
-  for (const col of POSITION_COLUMNS) {
-    if (positionRow[col]) return positionRow[col];
+export function resolvePosition(positionRows) {
+  if (!positionRows || positionRows.length === 0) return 'Other';
+  for (const source of SOURCE_PRIORITY) {
+    const positions = positionRows
+      .filter(r => r.source === source)
+      .map(r => r.position);
+    if (positions.length > 0) return positions.join(', ');
   }
   return 'Other';
 }

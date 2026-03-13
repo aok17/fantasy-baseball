@@ -8,13 +8,41 @@ const weights = {
 const posAdj = { C: 70, OF: 40, '2B': 30, '3B': 25, SS: 20, '1B': 15, Other: 10 };
 
 describe('resolvePosition', () => {
-  it('returns first non-empty position from sources', () => {
-    const positions = { pos_espn_2025: null, pos_yahoo_2025: 'SS', pos_espn_2024: '2B' };
-    expect(resolvePosition(positions)).toBe('SS');
+  it('returns positions from highest-priority source', () => {
+    const rows = [
+      { source: 'yahoo_2025', position: 'SS' },
+      { source: 'espn_2024', position: '2B' },
+    ];
+    expect(resolvePosition(rows)).toBe('SS');
   });
 
-  it('returns first position from multi-position string for adjustment', () => {
-    expect(resolvePosition({ pos_espn_2025: 'OF, 2B' })).toBe('OF, 2B');
+  it('returns espn_2025 over yahoo_2025 when both present', () => {
+    const rows = [
+      { source: 'espn_2025', position: 'OF' },
+      { source: 'espn_2025', position: '2B' },
+      { source: 'yahoo_2025', position: 'SS' },
+    ];
+    expect(resolvePosition(rows)).toBe('OF, 2B');
+  });
+
+  it('joins multiple positions from same source with comma', () => {
+    const rows = [
+      { source: 'espn_2025', position: 'SS' },
+      { source: 'espn_2025', position: 'OF' },
+    ];
+    expect(resolvePosition(rows)).toBe('SS, OF');
+  });
+
+  it('returns Other when no rows', () => {
+    expect(resolvePosition([])).toBe('Other');
+  });
+
+  it('prefers manual source above all others', () => {
+    const rows = [
+      { source: 'espn_2025', position: 'OF' },
+      { source: 'manual', position: 'SS' },
+    ];
+    expect(resolvePosition(rows)).toBe('SS');
   });
 });
 
