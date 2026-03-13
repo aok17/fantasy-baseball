@@ -23,7 +23,7 @@ describe('rescoreAll', () => {
     db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS)
       VALUES ('Test OF', 'LAD', 150, 600, 550, 160, 30, 5, 35, 95, 100, 60, 130, 5, 15, 3)`).run();
 
-    db.prepare(`INSERT INTO batter_positions (name, pos_espn_2025) VALUES ('Test OF', 'OF')`).run();
+    db.prepare(`INSERT INTO position_eligibility (name, source, position) VALUES ('Test OF', 'espn_2025', 'OF')`).run();
   });
 
   afterEach(() => { db.close(); });

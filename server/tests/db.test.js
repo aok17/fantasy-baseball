@@ -40,7 +40,7 @@ describe('database schema', () => {
     expect(tables).toContain('position_adjustments');
     expect(tables).toContain('app_config');
     expect(tables).toContain('name_replacements');
-    expect(tables).toContain('batter_positions');
+    expect(tables).toContain('position_eligibility');
     expect(tables).toContain('espn_adp');
   });
 });

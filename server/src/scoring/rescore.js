@@ -22,16 +22,20 @@ function getConfig(db, key) {
 }
 
 function getVelocityDeltas(db) {
+  const row = db.prepare("SELECT value FROM app_config WHERE key = 'season_year'").get();
+  const currentYear = Number(row?.value) || new Date().getFullYear();
+  const prevYear = currentYear - 1;
   const rows = db.prepare(`
-    SELECT player_name, v_2024, v_2025, (v_2025 - v_2024) as delta FROM (
+    SELECT player_name, v_prev, v_curr, (v_curr - v_prev) as delta, n_curr FROM (
       SELECT player_name,
-        MAX(CASE WHEN season = 2024 AND season_type = 'regular' THEN velocity END) as v_2024,
-        MAX(CASE WHEN season = 2025 AND season_type = 'spring' THEN velocity END) as v_2025
+        MAX(CASE WHEN season = ? AND season_type = 'regular' THEN velocity END) as v_prev,
+        MAX(CASE WHEN season = ? AND season_type = 'spring' THEN velocity END) as v_curr,
+        SUM(CASE WHEN season = ? AND season_type = 'spring' THEN 1 ELSE 0 END) as n_curr
       FROM statcast_pitches GROUP BY player_name
-    ) WHERE v_2024 IS NOT NULL AND v_2025 IS NOT NULL AND (v_2025 - v_2024) < 10
-  `).all();
+    ) WHERE v_prev IS NOT NULL AND v_curr IS NOT NULL AND (v_curr - v_prev) < 10
+  `).all(prevYear, currentYear, currentYear);
   const deltas = {};
-  for (const r of rows) deltas[r.player_name] = r.delta;
+  for (const r of rows) deltas[r.player_name] = { delta: r.delta, velo_prev: r.v_prev, velo_curr: r.v_curr, velo_n: r.n_curr };
   return deltas;
 }
 
@@ -62,12 +66,14 @@ export function rescoreAll(db) {
     for (const p of pitcherScores) insertPitcher.run(p);
 
     const rawBatters = db.prepare('SELECT * FROM batters_raw').all();
+    const posRows = db.prepare('SELECT name, source, position FROM position_eligibility').all();
     const positionsMap = {};
-    for (const row of db.prepare('SELECT * FROM batter_positions').all()) {
-      positionsMap[row.name] = resolvePosition(row);
+    for (const row of posRows) {
+      if (!positionsMap[row.name]) positionsMap[row.name] = [];
+      positionsMap[row.name].push(row);
     }
     const battersWithPos = rawBatters.map(b => ({
-      ...b, position: positionsMap[b.name] || 'Other',
+      ...b, position: resolvePosition(positionsMap[b.name] || []),
     }));
     const batterScores = computeBatterScores(battersWithPos, batterWeights, posAdj);
 
@@ -85,9 +91,9 @@ export function rescoreAll(db) {
     db.prepare('DELETE FROM combined_rankings').run();
     const insertCombined = db.prepare(`
       INSERT INTO combined_rankings (rank, name, team, position, score, adj_score,
-        espn_adp, velocity_delta, per_game_efficiency, value_gap)
+        espn_adp, velocity_delta, velo_prev, velo_curr, velo_n, per_game_efficiency, value_gap)
       VALUES (@rank, @name, @team, @position, @score, @adj_score,
-        @espn_adp, @velocity_delta, @per_game_efficiency, @value_gap)
+        @espn_adp, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @value_gap)
     `);
     for (const c of combined) insertCombined.run(c);
   })();
