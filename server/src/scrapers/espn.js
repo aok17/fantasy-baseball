@@ -23,7 +23,7 @@ export function parseEspnResponse(json) {
           .map(s => ESPN_SLOT_TO_POSITION[s]);
     return {
       name: p.player?.fullName || '',
-      adp_rank: p.ratings?.['0']?.totalRanking ?? null,
+      adp_rank: p.player?.draftRanksByRankType?.STANDARD?.rank ?? null,
       projected_points: p.ratings?.['0']?.totalRating ?? null,
       positions,
     };

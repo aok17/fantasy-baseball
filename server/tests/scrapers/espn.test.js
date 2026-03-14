@@ -4,32 +4,32 @@ import { parseEspnResponse, ESPN_SLOT_TO_POSITION } from '../../src/scrapers/esp
 const sampleResponse = {
   players: [
     {
-      player: { fullName: 'Shohei Ohtani', id: 39832, defaultPositionId: 10, eligibleSlots: [11, 13, 14, 16, 17] },
-      ratings: { '0': { positionalRanking: 1, totalRanking: 1, totalRating: 450.5 } },
+      player: { fullName: 'Shohei Ohtani', id: 39832, defaultPositionId: 10, eligibleSlots: [11, 13, 14, 16, 17], draftRanksByRankType: { STANDARD: { rank: 1 } } },
+      ratings: { '0': { positionalRanking: 1, totalRating: 450.5 } },
     },
     {
-      player: { fullName: 'Mookie Betts', id: 33039, defaultPositionId: 6, eligibleSlots: [4, 6, 19, 10, 5, 12, 16, 17] },
-      ratings: { '0': { positionalRanking: 3, totalRanking: 9, totalRating: 380.2 } },
+      player: { fullName: 'Mookie Betts', id: 33039, defaultPositionId: 6, eligibleSlots: [4, 6, 19, 10, 5, 12, 16, 17], draftRanksByRankType: { STANDARD: { rank: 9 } } },
+      ratings: { '0': { positionalRanking: 3, totalRating: 380.2 } },
     },
     {
-      player: { fullName: 'Logan Webb', id: 41278, defaultPositionId: 1, eligibleSlots: [13, 14, 16, 17] },
-      ratings: { '0': { positionalRanking: 10, totalRanking: 45, totalRating: 200.0 } },
+      player: { fullName: 'Logan Webb', id: 41278, defaultPositionId: 1, eligibleSlots: [13, 14, 16, 17], draftRanksByRankType: { STANDARD: { rank: 45 } } },
+      ratings: { '0': { positionalRanking: 10, totalRating: 200.0 } },
     },
     {
-      player: { fullName: 'Cal Raleigh', id: 41345, defaultPositionId: 2, eligibleSlots: [0, 12, 16, 17] },
-      ratings: { '0': { positionalRanking: 5, totalRanking: 8, totalRating: 150.0 } },
+      player: { fullName: 'Cal Raleigh', id: 41345, defaultPositionId: 2, eligibleSlots: [0, 12, 16, 17], draftRanksByRankType: { STANDARD: { rank: 12 } } },
+      ratings: { '0': { positionalRanking: 5, totalRating: 150.0 } },
     },
   ],
 };
 
 describe('parseEspnResponse', () => {
-  it('extracts name, adp_rank from totalRanking, projected_points', () => {
+  it('extracts name, adp_rank from STANDARD draft rank, projected_points', () => {
     const result = parseEspnResponse(sampleResponse);
     const mookie = result.find(p => p.name === 'Mookie Betts');
-    expect(mookie.adp_rank).toBe(9); // totalRanking
+    expect(mookie.adp_rank).toBe(9); // STANDARD.rank
     expect(mookie.projected_points).toBeCloseTo(380.2);
     const raleigh = result.find(p => p.name === 'Cal Raleigh');
-    expect(raleigh.adp_rank).toBe(8); // totalRanking
+    expect(raleigh.adp_rank).toBe(12); // STANDARD.rank
   });
 
   it('maps eligibleSlots to position strings for hitters', () => {
