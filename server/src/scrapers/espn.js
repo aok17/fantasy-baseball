@@ -53,6 +53,16 @@ export async function fetchEspn(db) {
   const accentMap = buildAccentMap(db);
   const source = `espn_${year}`;
 
+  // For duplicate names (e.g. two "Julio Rodriguez"), only accent-map the
+  // one with the highest projected points — that's the star player that
+  // FanGraphs has projections for. The minor leaguer keeps the ASCII name.
+  const bestByName = {};
+  for (const p of players) {
+    const n = reconcileName(p.name, replacements);
+    const pts = p.projected_points || 0;
+    if (!bestByName[n] || pts > bestByName[n]) bestByName[n] = pts;
+  }
+
   db.prepare('DELETE FROM espn_adp').run();
   db.prepare('DELETE FROM position_eligibility WHERE source = ?').run(source);
 
@@ -64,9 +74,10 @@ export async function fetchEspn(db) {
   );
 
   for (const p of players) {
-    // First apply manual replacements, then try accent-based matching
     let name = reconcileName(p.name, replacements);
-    if (accentMap[name]) name = accentMap[name];
+    // Only accent-map if this is the best player with this name
+    const pts = p.projected_points || 0;
+    if (accentMap[name] && pts >= bestByName[name]) name = accentMap[name];
     insertAdp.run(name, p.adp_rank, p.projected_points);
     for (const pos of p.positions) {
       insertPos.run(name, source, pos);
