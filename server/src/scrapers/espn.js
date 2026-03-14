@@ -21,10 +21,9 @@ export function parseEspnResponse(json) {
       : slots
           .filter(s => s in ESPN_SLOT_TO_POSITION)
           .map(s => ESPN_SLOT_TO_POSITION[s]);
-    const adp = p.player?.ownership?.averageDraftPosition ?? null;
     return {
       name: p.player?.fullName || '',
-      adp_rank: adp ? Math.round(adp) : null,
+      adp_rank: p.ratings?.['0']?.totalRanking ?? null,
       projected_points: p.ratings?.['0']?.totalRating ?? null,
       positions,
     };

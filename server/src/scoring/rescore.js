@@ -65,7 +65,8 @@ export function rescoreAll(db) {
     `);
     for (const p of pitcherScores) insertPitcher.run(p);
 
-    const rawBatters = db.prepare('SELECT * FROM batters_raw').all();
+    // Filter out pitchers with token batter projections (< 10 PA)
+    const rawBatters = db.prepare('SELECT * FROM batters_raw WHERE PA >= 10').all();
     const posRows = db.prepare('SELECT name, source, position FROM position_eligibility').all();
     const positionsMap = {};
     for (const row of posRows) {
