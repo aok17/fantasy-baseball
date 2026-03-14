@@ -1,4 +1,4 @@
-import { reconcileName, loadReplacements } from './names.js';
+import { reconcileName, loadReplacements, buildAccentMap } from './names.js';
 
 export const ESPN_SLOT_TO_POSITION = {
   0: 'C',
@@ -50,6 +50,7 @@ export async function fetchEspn(db) {
   const players = parseEspnResponse(json);
 
   const replacements = loadReplacements(db);
+  const accentMap = buildAccentMap(db);
   const source = `espn_${year}`;
 
   db.prepare('DELETE FROM espn_adp').run();
@@ -63,7 +64,9 @@ export async function fetchEspn(db) {
   );
 
   for (const p of players) {
-    const name = reconcileName(p.name, replacements);
+    // First apply manual replacements, then try accent-based matching
+    let name = reconcileName(p.name, replacements);
+    if (accentMap[name]) name = accentMap[name];
     insertAdp.run(name, p.adp_rank, p.projected_points);
     for (const pos of p.positions) {
       insertPos.run(name, source, pos);
