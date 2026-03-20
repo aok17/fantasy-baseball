@@ -27,4 +27,14 @@ export const api = {
   addNameReplacement: (alt, canonical) => json('/config/name-replacements', { method: 'POST', body: JSON.stringify({ alt_name: alt, canonical_name: canonical }) }),
   deleteNameReplacement: (id) => json(`/config/name-replacements/${id}`, { method: 'DELETE' }),
   scrape: (source) => json(`/scrape/${source}`, { method: 'POST' }),
+  updatePlayerNote: (name, note) => json('/rankings/notes', { method: 'PUT', body: JSON.stringify({ name, note }) }),
+  getFreshness: () => json('/config/app').then(configs => {
+    const freshness = {};
+    for (const c of configs) {
+      if (c.key.startsWith('last_refreshed_')) {
+        freshness[c.key.replace('last_refreshed_', '')] = c.value;
+      }
+    }
+    return freshness;
+  }),
 };
