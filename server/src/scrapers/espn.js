@@ -31,22 +31,34 @@ export function parseEspnResponse(json) {
   }).filter(p => p.name);
 }
 
-export async function fetchEspn(db) {
-  const year = db.prepare("SELECT value FROM app_config WHERE key='season_year'").get()?.value || '2026';
-  const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/${year}/segments/0/leaguedefaults/3?view=kona_player_info`;
-
+// Fetch a single batch of players from ESPN
+async function fetchEspnBatch(url, offset, limit) {
   const res = await fetch(url, {
     headers: {
       'x-fantasy-filter': JSON.stringify({
-        players: { limit: 1500, sortPercOwned: { sortAsc: false, sortPriority: 1 } },
+        players: { limit, offset, sortPercOwned: { sortAsc: false, sortPriority: 1 } },
       }),
     },
   });
   if (!res.ok) throw new Error(`ESPN fetch failed: ${res.status}`);
   let json = await res.json();
   const players = parseEspnResponse(json);
-  // Free the large ESPN response from memory (~30MB)
-  json = null;
+  json = null; // free ~12MB per batch
+  return players;
+}
+
+export async function fetchEspn(db) {
+  const year = db.prepare("SELECT value FROM app_config WHERE key='season_year'").get()?.value || '2026';
+  const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/${year}/segments/0/leaguedefaults/3?view=kona_player_info`;
+
+  // Fetch in batches of 300 to stay under 256MB memory limit (~35MB heap per batch)
+  const BATCH_SIZE = 300;
+  const players = [];
+  for (let offset = 0; offset < 1500; offset += BATCH_SIZE) {
+    const batch = await fetchEspnBatch(url, offset, BATCH_SIZE);
+    players.push(...batch);
+    if (batch.length < BATCH_SIZE) break; // no more players
+  }
 
   if (players.length === 0) {
     console.warn('ESPN returned 0 players — keeping existing data');
