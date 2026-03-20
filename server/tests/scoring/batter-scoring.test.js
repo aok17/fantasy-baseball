@@ -5,7 +5,7 @@ const weights = {
   H: 1.0, '2B': 1.0, '3B': 2.0, HR: 3.1, R: 1.1,
   RBI: 1.1, BB: 1.0, SO: -1.0, SB: 2.0,
 };
-const posAdj = { C: 70, OF: 40, '2B': 30, '3B': 25, SS: 20, '1B': 15, Other: 10 };
+const posAdj = { C: 70, OF: 40, '2B': 30, '3B': 25, SS: 20, '1B': 15, DH: 10 };
 
 describe('resolvePosition', () => {
   it('returns positions from highest-priority source prefix', () => {
@@ -34,8 +34,8 @@ describe('resolvePosition', () => {
     expect(resolvePosition(rows)).toBe('SS, OF');
   });
 
-  it('returns Other when no rows', () => {
-    expect(resolvePosition([])).toBe('Other');
+  it('returns DH when no rows', () => {
+    expect(resolvePosition([])).toBe('DH');
   });
 
   it('prefers manual source above all others', () => {

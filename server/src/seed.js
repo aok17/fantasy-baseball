@@ -26,7 +26,7 @@ export function seedDefaults(db) {
   );
   const posAdj = [
     ['C', 70], ['OF', 40], ['2B', 30], ['3B', 25],
-    ['SS', 20], ['1B', 15], ['Other', 10],
+    ['SS', 20], ['1B', 15], ['DH', 10],
   ];
   for (const [pos, adj] of posAdj) {
     insertAdj.run(pos, adj);

@@ -6,7 +6,7 @@ import { safeDivide } from './utils.js';
 const SOURCE_PRIORITY = ['manual', 'espn', 'yahoo', 'fantrax'];
 
 export function resolvePosition(positionRows) {
-  if (!positionRows || positionRows.length === 0) return 'Other';
+  if (!positionRows || positionRows.length === 0) return 'DH';
   for (const prefix of SOURCE_PRIORITY) {
     // Gather all rows matching this prefix, sort by source descending so newest year wins
     const matching = positionRows
@@ -20,7 +20,7 @@ export function resolvePosition(positionRows) {
       .map(r => r.position);
     if (positions.length > 0) return positions.join(', ');
   }
-  return 'Other';
+  return 'DH';
 }
 
 function primaryPosition(positionString) {
@@ -40,9 +40,9 @@ export function computeBatterScores(batters, weights, posAdj) {
       (b.SO || 0) * weights.SO +
       (b.SB || 0) * weights.SB;
 
-    const position = b.position || 'Other';
+    const position = b.position || 'DH';
     const primary = primaryPosition(position);
-    const adjustment = posAdj[primary] ?? posAdj.Other ?? 10;
+    const adjustment = posAdj[primary] ?? posAdj.DH ?? 10;
     const adj_score = raw_score + adjustment;
     const pts_per_game = safeDivide(raw_score, b.G);
 

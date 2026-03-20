@@ -1,25 +1,44 @@
 const ROSTER_SLOTS = {
-  C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 3, UTIL: 1, SP: 5, RP: 3,
+  C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 5,
+  MI: 1, CI: 1, UTIL: 1, P: 8, RP: 1,
+};
+
+// Maps a player's primary position to which roster slots it can fill, in priority order.
+const SLOT_ORDER = {
+  C: ['C', 'UTIL'],
+  '1B': ['1B', 'CI', 'UTIL'],
+  '2B': ['2B', 'MI', 'UTIL'],
+  '3B': ['3B', 'CI', 'UTIL'],
+  SS: ['SS', 'MI', 'UTIL'],
+  OF: ['OF', 'UTIL'],
+  DH: ['UTIL'],
+  SP: ['P'],
+  RP: ['P', 'RP'],
 };
 
 function getPositionNeeds(myPicks, rankings) {
-  const filled = {};
+  const remaining = {};
+  for (const [pos, count] of Object.entries(ROSTER_SLOTS)) {
+    remaining[pos] = count;
+  }
+
   for (const pick of myPicks) {
     const player = rankings.find(r => r.name === pick.player_name);
     if (!player?.position) continue;
     const pos = player.position.split(',')[0].trim();
-    // Map display positions to roster slots
-    const slot = pos === 'SP, RP' ? 'SP' : pos;
-    filled[slot] = (filled[slot] || 0) + 1;
+    const slots = SLOT_ORDER[pos] || ['UTIL'];
+    // Fill the first available slot
+    for (const slot of slots) {
+      if (remaining[slot] > 0) {
+        remaining[slot]--;
+        break;
+      }
+    }
   }
 
   const needs = [];
-  for (const [pos, count] of Object.entries(ROSTER_SLOTS)) {
-    const have = filled[pos] || 0;
-    const remaining = count - have;
-    if (remaining > 0) {
-      for (let i = 0; i < remaining; i++) needs.push(pos);
-    }
+  for (const [pos, left] of Object.entries(remaining)) {
+    for (let i = 0; i < left; i++) needs.push(pos);
   }
   return needs;
 }

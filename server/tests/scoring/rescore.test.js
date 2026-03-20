@@ -83,7 +83,7 @@ describe('rescoreAll edge cases', () => {
     rescoreAll(db);
     const rows = db.prepare('SELECT * FROM batter_scores').all();
     expect(rows).toHaveLength(1);
-    expect(rows[0].position).toBe('Other');
+    expect(rows[0].position).toBe('DH');
   });
 
   it('handles empty database gracefully', () => {
