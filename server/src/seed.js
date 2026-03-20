@@ -40,4 +40,6 @@ export function seedDefaults(db) {
   insertConfig.run('season_year', '2026');
   insertConfig.run('espn_league_id', '133164');
   insertConfig.run('espn_team_id', '7');
+  insertConfig.run('espn_bot_swid', process.env.ESPN_BOT_SWID || '');
+  insertConfig.run('espn_bot_s2', process.env.ESPN_BOT_S2 || '');
 }
