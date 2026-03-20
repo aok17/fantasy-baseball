@@ -23,6 +23,7 @@ export function parseEspnResponse(json) {
           .map(s => ESPN_SLOT_TO_POSITION[s]);
     return {
       name: p.player?.fullName || '',
+      espn_id: p.player?.id ?? p.id ?? null,
       adp_rank: p.player?.draftRanksByRankType?.STANDARD?.rank ?? null,
       projected_points: p.ratings?.['0']?.totalRating ?? null,
       positions,
@@ -64,21 +65,21 @@ export async function fetchEspn(db) {
   }
 
   const insertAdp = db.prepare(
-    'INSERT INTO espn_adp (name, adp_rank, projected_points) VALUES (?, ?, ?)'
+    'INSERT INTO espn_rank (name, espn_id, adp_rank, projected_points) VALUES (?, ?, ?, ?)'
   );
   const insertPos = db.prepare(
     'INSERT OR IGNORE INTO position_eligibility (name, source, position) VALUES (?, ?, ?)'
   );
 
   db.transaction(() => {
-    db.prepare('DELETE FROM espn_adp').run();
+    db.prepare('DELETE FROM espn_rank').run();
     db.prepare('DELETE FROM position_eligibility WHERE source = ?').run(source);
 
     for (const p of players) {
       let name = reconcileName(p.name, replacements);
       const pts = p.projected_points || 0;
       if (accentMap[name] && pts >= bestByName[name]) name = accentMap[name];
-      insertAdp.run(name, p.adp_rank, p.projected_points);
+      insertAdp.run(name, p.espn_id, p.adp_rank, p.projected_points);
       for (const pos of p.positions) {
         insertPos.run(name, source, pos);
       }

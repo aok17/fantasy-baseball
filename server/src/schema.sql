@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS combined_rankings (
   position TEXT,
   score REAL,
   adj_score REAL,
-  espn_adp INTEGER,
+  espn_rank INTEGER,
   velocity_delta REAL,
   velo_prev REAL,
   velo_curr REAL,
@@ -163,9 +163,10 @@ CREATE TABLE IF NOT EXISTS injuries (
   UNIQUE(name, team)
 );
 
-CREATE TABLE IF NOT EXISTS espn_adp (
+CREATE TABLE IF NOT EXISTS espn_rank (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
+  espn_id INTEGER,
   adp_rank INTEGER,
   projected_points REAL
 );
@@ -175,7 +176,7 @@ CREATE TABLE IF NOT EXISTS player_notes (
   note TEXT NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_espn_adp_name ON espn_adp(name);
+CREATE INDEX IF NOT EXISTS idx_espn_rank_name ON espn_rank(name);
 CREATE INDEX IF NOT EXISTS idx_injuries_name ON injuries(name);
 CREATE INDEX IF NOT EXISTS idx_position_eligibility_name ON position_eligibility(name);
 CREATE INDEX IF NOT EXISTS idx_player_notes_name ON player_notes(name);

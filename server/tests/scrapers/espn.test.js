@@ -56,6 +56,14 @@ describe('parseEspnResponse', () => {
     // Ohtani has no standard position slots (0-5), just DH/UTIL/P slots
     expect(ohtani.positions).toEqual([]);
   });
+
+  it('extracts espn_id from player.id', () => {
+    const result = parseEspnResponse(sampleResponse);
+    const ohtani = result.find(p => p.name === 'Shohei Ohtani');
+    expect(ohtani.espn_id).toBe(39832);
+    const mookie = result.find(p => p.name === 'Mookie Betts');
+    expect(mookie.espn_id).toBe(33039);
+  });
 });
 
 describe('ESPN_SLOT_TO_POSITION', () => {
