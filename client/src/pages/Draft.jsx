@@ -35,13 +35,20 @@ export default function Draft() {
     ...r, _taken: takenNames.has(r.name),
   }));
 
+  const handleNoteChange = useCallback((name, note) => {
+    api.updatePlayerNote(name, note);
+    setRankings(prev => prev.map(p => p.name === name ? { ...p, note } : p));
+  }, []);
+
   const handleDraft = useCallback(async (player) => {
     if (!activeSession) return;
-    const drafted_by = window.prompt(`Who drafted ${player.name}? (leave blank for "me")`) ?? 'me';
+    const result = window.prompt(`Who drafted ${player.name}? (leave blank for "me")`);
+    if (result === null) return; // User cancelled
+    const drafted_by = result || 'me';
     await api.createDraftPick(activeSession, {
       player_name: player.name,
       pick_number: nextPick,
-      drafted_by: drafted_by || 'me',
+      drafted_by,
     });
     setPicks(await api.getDraftPicks(activeSession));
   }, [activeSession, nextPick]);
@@ -56,9 +63,10 @@ export default function Draft() {
 
   return (
     <div className="flex">
-      <div className="flex-1 space-y-3">
+      <div className="flex-1 space-y-4">
         <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-lg font-bold">Draft</h1>
+          <h1 className="text-xl font-bold text-gray-900">Draft</h1>
+          <div className="h-5 w-px bg-gray-300" />
           <SessionSelector sessions={sessions} activeId={activeSession}
             onSelect={setActiveSession} onCreate={handleCreateSession} />
           <SearchBar value={search} onChange={setSearch} />
@@ -70,7 +78,7 @@ export default function Draft() {
           <span className="text-sm text-gray-500">Next pick: #{nextPick}</span>
         </div>
         <PlayerTable data={displayData} globalFilter={search} positionFilter={posFilter}
-          onRowClick={handleDraft}
+          onRowClick={handleDraft} onNoteChange={handleNoteChange}
           rowClassName={r => r._taken ? 'opacity-40 line-through' : ''} />
       </div>
       <RosterSidebar picks={picks} rankings={rankings} />
