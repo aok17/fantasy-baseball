@@ -5,6 +5,7 @@ const SOURCES = [
   { key: 'fangraphs', label: 'FanGraphs Projections' },
   { key: 'savant', label: 'Baseball Savant' },
   { key: 'espn', label: 'ESPN ADP' },
+  { key: 'injuries', label: 'Injury Report' },
 ];
 
 export default function DataRefresh() {
@@ -21,12 +22,15 @@ export default function DataRefresh() {
   };
 
   const runAll = async () => {
-    setStatus({ all: 'loading' });
-    try {
-      const result = await api.scrape('all');
-      setStatus({ all: `Done: ${JSON.stringify(result)}` });
-    } catch (e) {
-      setStatus({ all: `Error: ${e.message}` });
+    // Run each scraper sequentially so the server can free memory between them
+    for (const s of SOURCES) {
+      setStatus(prev => ({ ...prev, [s.key]: 'loading' }));
+      try {
+        const result = await api.scrape(s.key);
+        setStatus(prev => ({ ...prev, [s.key]: `Done: ${JSON.stringify(result)}` }));
+      } catch (e) {
+        setStatus(prev => ({ ...prev, [s.key]: `Error: ${e.message}` }));
+      }
     }
   };
 
