@@ -37,4 +37,7 @@ export const api = {
     }
     return freshness;
   }),
+  startSync: (sessionId) => json(`/draft/sessions/${sessionId}/sync/start`, { method: 'POST' }),
+  stopSync: (sessionId) => json(`/draft/sessions/${sessionId}/sync/stop`, { method: 'POST' }),
+  getSyncStatus: (sessionId) => json(`/draft/sessions/${sessionId}/sync/status`),
 };
