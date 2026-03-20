@@ -1,10 +1,69 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
 import PlayerTable from '../components/PlayerTable';
 import PositionFilter from '../components/PositionFilter';
 import SearchBar from '../components/SearchBar';
 import SessionSelector from '../components/SessionSelector';
 import RosterSidebar from '../components/RosterSidebar';
+
+function SyncStatusBar({ sessionId }) {
+  const [status, setStatus] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const poll = () => api.getSyncStatus(sessionId).then(setStatus).catch(() => {});
+    poll();
+    intervalRef.current = setInterval(poll, 3000);
+    return () => clearInterval(intervalRef.current);
+  }, [sessionId]);
+
+  const handleStart = async () => {
+    setSyncing(true);
+    try {
+      const result = await api.startSync(sessionId);
+      setStatus(result);
+    } catch (e) {
+      setStatus({ connected: false, error: e.message });
+    }
+    setSyncing(false);
+  };
+
+  const handleStop = async () => {
+    await api.stopSync(sessionId);
+    setStatus({ connected: false, pickCount: 0, lastPick: null, onTheClock: null, error: null });
+  };
+
+  if (!status) return null;
+
+  return (
+    <div className="flex items-center gap-3 text-xs px-3 py-1.5 bg-gray-50 border border-gray-200 rounded">
+      <span className={`inline-block w-2 h-2 rounded-full ${status.connected ? 'bg-green-500' : status.error ? 'bg-red-500' : 'bg-gray-400'}`} />
+      {status.connected ? (
+        <>
+          <span className="text-green-700 font-medium">ESPN Sync Active</span>
+          <span className="text-gray-500">Picks: {status.pickCount}</span>
+          {status.onTheClock && (
+            <span className="text-amber-600 font-medium">On clock: {status.onTheClock.team}</span>
+          )}
+          {status.lastPick && (
+            <span className="text-gray-500">Last: {status.lastPick.player_name} &rarr; {status.lastPick.drafted_by}</span>
+          )}
+          <button onClick={handleStop} className="text-red-500 hover:text-red-700 ml-auto">Stop</button>
+        </>
+      ) : (
+        <>
+          <span className="text-gray-500">{status.error ? `Error: ${status.error}` : 'ESPN Sync Off'}</span>
+          <button onClick={handleStart} disabled={syncing}
+            className="text-blue-600 hover:text-blue-800 ml-auto disabled:opacity-50">
+            {syncing ? 'Connecting...' : 'Start Sync'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function Draft() {
   const [rankings, setRankings] = useState([]);
@@ -15,6 +74,7 @@ export default function Draft() {
   const [posFilter, setPosFilter] = useState(null);
   const [hideTaken, setHideTaken] = useState(true);
   const [loading, setLoading] = useState(true);
+  const pollRef = useRef(null);
 
   useEffect(() => {
     Promise.all([api.getRankings(), api.getDraftSessions()]).then(([r, s]) => {
@@ -25,7 +85,11 @@ export default function Draft() {
   }, []);
 
   useEffect(() => {
-    if (activeSession) api.getDraftPicks(activeSession).then(setPicks);
+    if (!activeSession) return;
+    const poll = () => api.getDraftPicks(activeSession).then(setPicks);
+    poll();
+    pollRef.current = setInterval(poll, 3000);
+    return () => clearInterval(pollRef.current);
   }, [activeSession]);
 
   const takenNames = new Set(picks.map(p => p.player_name));
@@ -43,7 +107,7 @@ export default function Draft() {
   const handleDraft = useCallback(async (player) => {
     if (!activeSession) return;
     const result = window.prompt(`Who drafted ${player.name}? (leave blank for "me")`);
-    if (result === null) return; // User cancelled
+    if (result === null) return;
     const drafted_by = result || 'me';
     await api.createDraftPick(activeSession, {
       player_name: player.name,
@@ -77,6 +141,7 @@ export default function Draft() {
           </label>
           <span className="text-sm text-gray-500">Next pick: #{nextPick}</span>
         </div>
+        <SyncStatusBar sessionId={activeSession} />
         <PlayerTable data={displayData} globalFilter={search} positionFilter={posFilter}
           onRowClick={handleDraft} onNoteChange={handleNoteChange}
           rowClassName={r => r._taken ? 'opacity-40 line-through' : ''} />
