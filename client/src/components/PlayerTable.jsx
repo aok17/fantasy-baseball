@@ -273,7 +273,21 @@ export default function PlayerTable({ data, globalFilter, positionFilter, rankLi
       d = d.filter(r => r.rank != null && r.rank <= rankLimit);
     }
     if (positionFilter) {
-      d = d.filter(r => r.position?.includes(positionFilter));
+      const POSITION_EXPAND = {
+        MI: ['2B', 'SS'],
+        CI: ['1B', '3B'],
+        DH: ['DH'],
+        UTIL: null, // all hitters
+      };
+      const expanded = POSITION_EXPAND[positionFilter];
+      if (expanded === null) {
+        // UTIL = all hitters (not pitchers)
+        d = d.filter(r => r.position && !['SP', 'RP'].includes(r.position.split(',')[0].trim()));
+      } else if (expanded) {
+        d = d.filter(r => expanded.some(p => r.position?.includes(p)));
+      } else {
+        d = d.filter(r => r.position?.includes(positionFilter));
+      }
     }
     return d;
   }, [data, positionFilter, rankLimit]);

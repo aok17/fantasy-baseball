@@ -1,4 +1,4 @@
-const POSITIONS = ['All', 'SP', 'RP', 'C', '1B', '2B', '3B', 'SS', 'OF', 'MI', 'CI', 'DH'];
+const POSITIONS = ['All', 'SP', 'RP', 'C', '1B', '2B', '3B', 'SS', 'OF', 'MI', 'CI', 'UTIL', 'DH'];
 
 export default function PositionFilter({ value, onChange }) {
   return (
