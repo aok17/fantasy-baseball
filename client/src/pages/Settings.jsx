@@ -23,16 +23,16 @@ export default function Settings() {
   if (loading) return <div className="p-4 text-gray-500">Loading settings...</div>;
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <h1 className="text-lg font-bold">Settings</h1>
+    <div className="space-y-8 max-w-4xl">
+      <h1 className="text-xl font-bold text-gray-900">Settings</h1>
 
-      <section>
-        <h2 className="font-semibold mb-2">Scoring Weights</h2>
+      <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+        <h2 className="font-semibold text-gray-800 mb-3">Scoring Weights</h2>
         <WeightsEditor weights={weights} onSave={async (w) => { await api.updateWeights(w); load(); }} />
       </section>
 
-      <section>
-        <h2 className="font-semibold mb-2">Position Adjustments</h2>
+      <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+        <h2 className="font-semibold text-gray-800 mb-3">Position Adjustments</h2>
         <div className="flex gap-3 flex-wrap">
           {posAdj.map(a => (
             <div key={a.position} className="flex items-center gap-1">
@@ -47,17 +47,26 @@ export default function Settings() {
         </div>
       </section>
 
-      <section>
-        <h2 className="font-semibold mb-2">General</h2>
+      <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+        <h2 className="font-semibold text-gray-800 mb-3">General</h2>
         <div className="flex gap-4 items-center text-sm">
           <label>Replacement Level:
             <input type="number" value={replacementLevel}
-              onChange={e => api.updateAppConfig('replacement_level', e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                setConfig(prev => prev.map(c => c.key === 'replacement_level' ? { ...c, value: val } : c));
+                clearTimeout(window._rlDebounce);
+                window._rlDebounce = setTimeout(() => api.updateAppConfig('replacement_level', val), 2000);
+              }}
               className="border rounded px-2 py-1 w-20 ml-1" />
           </label>
           <label>Projection System:
             <select value={projSystem}
-              onChange={e => api.updateAppConfig('projection_system', e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                setConfig(prev => prev.map(c => c.key === 'projection_system' ? { ...c, value: val } : c));
+                api.updateAppConfig('projection_system', val);
+              }}
               className="border rounded px-2 py-1 ml-1">
               <option value="steamer">Steamer</option>
               <option value="zips">ZiPS</option>
@@ -66,13 +75,13 @@ export default function Settings() {
         </div>
       </section>
 
-      <section>
-        <h2 className="font-semibold mb-2">Data Sources</h2>
+      <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+        <h2 className="font-semibold text-gray-800 mb-3">Data Sources</h2>
         <DataRefresh />
       </section>
 
-      <section>
-        <h2 className="font-semibold mb-2">Name Replacements</h2>
+      <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+        <h2 className="font-semibold text-gray-800 mb-3">Name Replacements</h2>
         <NameReplacements replacements={nameReps}
           onAdd={async (alt, canonical) => { await api.addNameReplacement(alt, canonical); load(); }}
           onDelete={async (id) => { await api.deleteNameReplacement(id); load(); }} />
