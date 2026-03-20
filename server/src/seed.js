@@ -38,4 +38,6 @@ export function seedDefaults(db) {
   insertConfig.run('replacement_level', '237');
   insertConfig.run('projection_system', 'steamer');
   insertConfig.run('season_year', '2026');
+  insertConfig.run('espn_league_id', '133164');
+  insertConfig.run('espn_team_id', '7');
 }
