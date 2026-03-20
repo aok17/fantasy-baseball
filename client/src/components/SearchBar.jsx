@@ -5,7 +5,7 @@ export default function SearchBar({ value, onChange }) {
       placeholder="Search players..."
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="border rounded px-3 py-1 text-sm w-64"
+      className="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-gray-400"
     />
   );
 }

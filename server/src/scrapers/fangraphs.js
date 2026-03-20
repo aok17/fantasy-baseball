@@ -15,7 +15,7 @@ export function mapPitcher(r) {
     WHIP: num(r.WHIP), K9: num(r['K/9']), BB9: num(r['BB/9']),
     ERA: num(r.ERA), FIP: num(r.FIP),
     WAR: num(r.WAR), RA9WAR: num(r['RA9-WAR']),
-    player_id: r.playerid || null,
+    fg_id: r.playerid || null,
   };
 }
 
@@ -31,7 +31,7 @@ export function mapBatter(r) {
     OPS: num(r.OPS), wOBA: num(r.wOBA), wRC: num(r['wRC+']),
     BsR: num(r.wBsR), Fld: num(r.Def),
     Off: num(r.Off), Def: num(r.Def), WAR: num(r.WAR),
-    player_id: r.playerid || null,
+    fg_id: r.playerid || null,
   };
 }
 
@@ -56,13 +56,13 @@ export async function fetchFanGraphs(db) {
   db.transaction(() => {
     if (pitchers.length > 0) {
       db.prepare('DELETE FROM pitchers_raw').run();
-      const insertPit = db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB, WHIP, K9, BB9, ERA, FIP, WAR, RA9WAR, player_id) VALUES (@name, @team, @GS, @G, @IP, @W, @L, @QS, @SV, @HLD, @H, @ER, @HR, @SO, @BB, @WHIP, @K9, @BB9, @ERA, @FIP, @WAR, @RA9WAR, @player_id)`);
+      const insertPit = db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB, WHIP, K9, BB9, ERA, FIP, WAR, RA9WAR, fg_id) VALUES (@name, @team, @GS, @G, @IP, @W, @L, @QS, @SV, @HLD, @H, @ER, @HR, @SO, @BB, @WHIP, @K9, @BB9, @ERA, @FIP, @WAR, @RA9WAR, @fg_id)`);
       for (const p of pitchers) insertPit.run(p);
     }
 
     if (batters.length > 0) {
       db.prepare('DELETE FROM batters_raw').run();
-      const insertBat = db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS, AVG, OBP, SLG, OPS, wOBA, wRC, BsR, Fld, Off, Def, WAR, player_id) VALUES (@name, @team, @G, @PA, @AB, @H, @2B, @3B, @HR, @R, @RBI, @BB, @SO, @HBP, @SB, @CS, @AVG, @OBP, @SLG, @OPS, @wOBA, @wRC, @BsR, @Fld, @Off, @Def, @WAR, @player_id)`);
+      const insertBat = db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS, AVG, OBP, SLG, OPS, wOBA, wRC, BsR, Fld, Off, Def, WAR, fg_id) VALUES (@name, @team, @G, @PA, @AB, @H, @2B, @3B, @HR, @R, @RBI, @BB, @SO, @HBP, @SB, @CS, @AVG, @OBP, @SLG, @OPS, @wOBA, @wRC, @BsR, @Fld, @Off, @Def, @WAR, @fg_id)`);
       for (const b of batters) insertBat.run(b);
     }
   })();

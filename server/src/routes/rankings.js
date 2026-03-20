@@ -24,23 +24,23 @@ export function createRankingsRouter(db) {
         br.WAR as bat_war
       FROM combined_rankings cr
       LEFT JOIN players p ON cr.player_id = p.id
-      LEFT JOIN pitchers_raw pr ON cr.name = pr.name AND cr.team = pr.team
-      LEFT JOIN batters_raw br ON cr.name = br.name AND cr.team = br.team
-      LEFT JOIN injuries inj ON cr.name = inj.name
-      LEFT JOIN player_notes pn ON cr.name = pn.name
+      LEFT JOIN pitchers_raw pr ON pr.player_id = cr.player_id
+      LEFT JOIN batters_raw br ON br.player_id = cr.player_id
+      LEFT JOIN injuries inj ON inj.player_id = cr.player_id
+      LEFT JOIN player_notes pn ON pn.player_id = cr.player_id
       ORDER BY cr.rank
     `).all();
     res.json(rows);
   });
 
   router.put('/notes', (req, res) => {
-    const { name, note } = req.body;
-    if (!name) return res.status(400).json({ error: 'name is required' });
+    const { player_id, note } = req.body;
+    if (!player_id) return res.status(400).json({ error: 'player_id is required' });
     if (note) {
-      db.prepare('INSERT INTO player_notes (name, note) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET note = excluded.note')
-        .run(name, note);
+      db.prepare('INSERT INTO player_notes (player_id, note) VALUES (?, ?) ON CONFLICT(player_id) DO UPDATE SET note = excluded.note')
+        .run(player_id, note);
     } else {
-      db.prepare('DELETE FROM player_notes WHERE name = ?').run(name);
+      db.prepare('DELETE FROM player_notes WHERE player_id = ?').run(player_id);
     }
     res.json({ ok: true });
   });

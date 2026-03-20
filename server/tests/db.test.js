@@ -41,7 +41,7 @@ describe('database schema', () => {
     expect(tables).toContain('app_config');
     expect(tables).toContain('name_replacements');
     expect(tables).toContain('position_eligibility');
-    expect(tables).toContain('espn_adp');
+    expect(tables).toContain('espn_rank');
     expect(tables).toContain('players');
   });
 });

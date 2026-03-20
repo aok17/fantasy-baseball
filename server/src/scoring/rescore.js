@@ -26,24 +26,28 @@ function getVelocityDeltas(db) {
   const currentYear = Number(row?.value) || new Date().getFullYear();
   const prevYear = currentYear - 1;
   const rows = db.prepare(`
-    SELECT player_name, v_prev, v_curr, (v_curr - v_prev) as delta, n_curr FROM (
+    SELECT p.id as pid, sp.player_name, v_prev, v_curr, (v_curr - v_prev) as delta, n_curr FROM (
       SELECT player_name,
         MAX(CASE WHEN season = ? AND season_type = 'regular' THEN velocity END) as v_prev,
         MAX(CASE WHEN season = ? AND season_type = 'spring' THEN velocity END) as v_curr,
         SUM(CASE WHEN season = ? AND season_type = 'spring' THEN 1 ELSE 0 END) as n_curr
       FROM statcast_pitches GROUP BY player_name
-    ) WHERE v_prev IS NOT NULL AND v_curr IS NOT NULL AND (v_curr - v_prev) < 10
+    ) sp
+    LEFT JOIN players p ON p.name = sp.player_name
+    WHERE v_prev IS NOT NULL AND v_curr IS NOT NULL AND (v_curr - v_prev) < 10
   `).all(prevYear, currentYear, currentYear);
   const deltas = {};
-  for (const r of rows) deltas[r.player_name] = { delta: r.delta, velo_prev: r.v_prev, velo_curr: r.v_curr, velo_n: r.n_curr };
+  for (const r of rows) {
+    if (r.pid) deltas[r.pid] = { delta: r.delta, velo_prev: r.v_prev, velo_curr: r.v_curr, velo_n: r.n_curr };
+  }
   return deltas;
 }
 
-function getEspnAdp(db) {
-  const rows = db.prepare('SELECT name, adp_rank FROM espn_adp').all();
-  const adp = {};
-  for (const r of rows) adp[r.name] = r.adp_rank;
-  return adp;
+function getEspnRank(db) {
+  const rows = db.prepare('SELECT player_id, adp_rank FROM espn_rank WHERE player_id IS NOT NULL').all();
+  const rank = {};
+  for (const r of rows) rank[r.player_id] = r.adp_rank;
+  return rank;
 }
 
 function upsertPlayers(db, pitcherScores, batterScores) {
@@ -59,10 +63,10 @@ function upsertPlayers(db, pitcherScores, batterScores) {
   for (const b of batterScores) upsert.run(b.name, b.team);
 
   // Populate fg_id from raw tables
-  const fgPitchers = db.prepare('SELECT name, team, player_id FROM pitchers_raw WHERE player_id IS NOT NULL').all();
-  for (const r of fgPitchers) updateFgId.run(r.player_id, r.name, r.team);
-  const fgBatters = db.prepare('SELECT name, team, player_id FROM batters_raw WHERE player_id IS NOT NULL').all();
-  for (const r of fgBatters) updateFgId.run(r.player_id, r.name, r.team);
+  const fgPitchers = db.prepare('SELECT name, team, fg_id FROM pitchers_raw WHERE fg_id IS NOT NULL').all();
+  for (const r of fgPitchers) updateFgId.run(r.fg_id, r.name, r.team);
+  const fgBatters = db.prepare('SELECT name, team, fg_id FROM batters_raw WHERE fg_id IS NOT NULL').all();
+  for (const r of fgBatters) updateFgId.run(r.fg_id, r.name, r.team);
 
   // Populate mlbam_id from statcast
   const statcast = db.prepare('SELECT DISTINCT player_name, player_id FROM statcast_pitches WHERE player_id IS NOT NULL').all();
@@ -72,6 +76,26 @@ function upsertPlayers(db, pitcherScores, batterScores) {
   const idMap = {};
   const allPlayers = db.prepare('SELECT id, name, team FROM players').all();
   for (const p of allPlayers) idMap[`${p.name}|${p.team}`] = p.id;
+
+  // Populate player_id FK on all satellite tables
+  db.exec(`
+    UPDATE pitchers_raw SET player_id = (
+      SELECT p.id FROM players p WHERE p.name = pitchers_raw.name AND p.team = pitchers_raw.team
+    ) WHERE player_id IS NULL;
+    UPDATE batters_raw SET player_id = (
+      SELECT p.id FROM players p WHERE p.name = batters_raw.name AND p.team = batters_raw.team
+    ) WHERE player_id IS NULL;
+    UPDATE espn_rank SET player_id = (
+      SELECT p.id FROM players p WHERE p.name = espn_rank.name
+    ) WHERE player_id IS NULL;
+    UPDATE injuries SET player_id = (
+      SELECT p.id FROM players p WHERE p.name = injuries.name AND p.team = injuries.team
+    ) WHERE player_id IS NULL;
+    UPDATE position_eligibility SET player_id = (
+      SELECT p.id FROM players p WHERE p.name = position_eligibility.name
+    ) WHERE player_id IS NULL;
+  `);
+
   return idMap;
 }
 
@@ -85,53 +109,50 @@ export function rescoreAll(db) {
     const rawPitchers = db.prepare('SELECT * FROM pitchers_raw').all();
     const pitcherScores = computePitcherScores(rawPitchers, pitcherWeights, replacementLevel);
 
-    db.prepare('DELETE FROM pitcher_scores').run();
-    const insertPitcher = db.prepare(`
-      INSERT INTO pitcher_scores (name, team, scoring_position, display_position,
-        raw_score, adjustment, adj_score, starting_pts, relief_pts, adj_2020_value, pts_per_appearance)
-      VALUES (@name, @team, @scoring_position, @display_position,
-        @raw_score, @adjustment, @adj_score, @starting_pts, @relief_pts, @adj_2020_value, @pts_per_appearance)
-    `);
-    for (const p of pitcherScores) insertPitcher.run(p);
-
     const rawBatters = db.prepare('SELECT * FROM batters_raw WHERE PA >= 10').all();
-    const posRows = db.prepare('SELECT name, source, position FROM position_eligibility').all();
+    const posRows = db.prepare('SELECT player_id, name, source, position FROM position_eligibility').all();
     const positionsMap = {};
     for (const row of posRows) {
-      if (!positionsMap[row.name]) positionsMap[row.name] = [];
-      positionsMap[row.name].push(row);
+      const key = row.player_id || row.name;
+      if (!positionsMap[key]) positionsMap[key] = [];
+      positionsMap[key].push(row);
     }
-    const battersWithPos = rawBatters.map(b => ({
-      ...b, position: resolvePosition(positionsMap[b.name] || []),
-    }));
+    const battersWithPos = rawBatters.map(b => {
+      const key = b.player_id || b.name;
+      return { ...b, position: resolvePosition(positionsMap[key] || positionsMap[b.name] || []) };
+    });
     const batterScores = computeBatterScores(battersWithPos, batterWeights, posAdj);
+
+    // Upsert players and populate player_id FKs on satellite tables
+    const idMap = upsertPlayers(db, pitcherScores, batterScores);
+
+    db.prepare('DELETE FROM pitcher_scores').run();
+    const insertPitcher = db.prepare(`
+      INSERT INTO pitcher_scores (player_id, name, team, scoring_position, display_position,
+        raw_score, adjustment, adj_score, starting_pts, relief_pts, adj_2020_value, pts_per_appearance)
+      VALUES (@player_id, @name, @team, @scoring_position, @display_position,
+        @raw_score, @adjustment, @adj_score, @starting_pts, @relief_pts, @adj_2020_value, @pts_per_appearance)
+    `);
+    for (const p of pitcherScores) insertPitcher.run({ ...p, player_id: idMap[`${p.name}|${p.team}`] || null });
 
     db.prepare('DELETE FROM batter_scores').run();
     const insertBatter = db.prepare(`
-      INSERT INTO batter_scores (name, team, position, raw_score, adjustment, adj_score, pts_per_game)
-      VALUES (@name, @team, @position, @raw_score, @adjustment, @adj_score, @pts_per_game)
+      INSERT INTO batter_scores (player_id, name, team, position, raw_score, adjustment, adj_score, pts_per_game)
+      VALUES (@player_id, @name, @team, @position, @raw_score, @adjustment, @adj_score, @pts_per_game)
     `);
-    for (const b of batterScores) insertBatter.run(b);
+    for (const b of batterScores) insertBatter.run({ ...b, player_id: idMap[`${b.name}|${b.team}`] || null });
 
-    // Upsert players and get ID map
-    const idMap = upsertPlayers(db, pitcherScores, batterScores);
-
-    const espnAdp = getEspnAdp(db);
+    const espnRank = getEspnRank(db);
     const velocityDeltas = getVelocityDeltas(db);
-    const combined = buildCombinedRankings(pitcherScores, batterScores, espnAdp, velocityDeltas);
+    const combined = buildCombinedRankings(pitcherScores, batterScores, espnRank, velocityDeltas, idMap);
 
     db.prepare('DELETE FROM combined_rankings').run();
     const insertCombined = db.prepare(`
       INSERT INTO combined_rankings (player_id, rank, name, team, position, score, adj_score,
-        espn_adp, velocity_delta, velo_prev, velo_curr, velo_n, per_game_efficiency, value_gap)
+        espn_rank, velocity_delta, velo_prev, velo_curr, velo_n, per_game_efficiency, value_gap)
       VALUES (@player_id, @rank, @name, @team, @position, @score, @adj_score,
-        @espn_adp, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @value_gap)
+        @espn_rank, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @value_gap)
     `);
-    for (const c of combined) {
-      insertCombined.run({
-        ...c,
-        player_id: idMap[`${c.name}|${c.team}`] || null,
-      });
-    }
+    for (const c of combined) insertCombined.run(c);
   })();
 }

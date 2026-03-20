@@ -5,7 +5,7 @@ export default function PositionFilter({ value, onChange }) {
     <div className="flex gap-1">
       {POSITIONS.map(p => (
         <button key={p}
-          className={`px-3 py-1 text-xs rounded ${(p === 'All' && !value) || value === p ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${(p === 'All' && !value) || value === p ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
           onClick={() => onChange(p === 'All' ? null : p)}>
           {p}
         </button>

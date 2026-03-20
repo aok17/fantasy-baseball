@@ -15,6 +15,7 @@ CREATE INDEX IF NOT EXISTS idx_players_mlbam_id ON players(mlbam_id);
 
 CREATE TABLE IF NOT EXISTS pitchers_raw (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   team TEXT,
   GS INTEGER, G INTEGER, IP REAL, W INTEGER, L INTEGER,
@@ -22,11 +23,12 @@ CREATE TABLE IF NOT EXISTS pitchers_raw (
   H INTEGER, ER INTEGER, HR INTEGER, SO INTEGER, BB INTEGER,
   WHIP REAL, K9 REAL, BB9 REAL, ERA REAL, FIP REAL,
   WAR REAL, RA9WAR REAL,
-  player_id TEXT
+  fg_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS batters_raw (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   team TEXT,
   G INTEGER, PA INTEGER, AB INTEGER, H INTEGER,
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS batters_raw (
   AVG REAL, OBP REAL, SLG REAL, OPS REAL,
   wOBA REAL, wRC INTEGER,
   BsR REAL, Fld REAL, Off REAL, Def REAL, WAR REAL,
-  player_id TEXT
+  fg_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS statcast_pitches (
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS statcast_pitches (
 
 CREATE TABLE IF NOT EXISTS pitcher_scores (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   team TEXT,
   scoring_position TEXT,
@@ -70,6 +73,7 @@ CREATE TABLE IF NOT EXISTS pitcher_scores (
 
 CREATE TABLE IF NOT EXISTS batter_scores (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   team TEXT,
   position TEXT,
@@ -99,8 +103,12 @@ CREATE TABLE IF NOT EXISTS combined_rankings (
 
 CREATE INDEX IF NOT EXISTS idx_combined_player_id ON combined_rankings(player_id);
 CREATE INDEX IF NOT EXISTS idx_pitchers_raw_name ON pitchers_raw(name, team);
+CREATE INDEX IF NOT EXISTS idx_pitchers_raw_player_id ON pitchers_raw(player_id);
 CREATE INDEX IF NOT EXISTS idx_batters_raw_name ON batters_raw(name, team);
+CREATE INDEX IF NOT EXISTS idx_batters_raw_player_id ON batters_raw(player_id);
 CREATE INDEX IF NOT EXISTS idx_statcast_name ON statcast_pitches(player_name);
+CREATE INDEX IF NOT EXISTS idx_pitcher_scores_player_id ON pitcher_scores(player_id);
+CREATE INDEX IF NOT EXISTS idx_batter_scores_player_id ON batter_scores(player_id);
 
 CREATE TABLE IF NOT EXISTS draft_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,6 +153,7 @@ CREATE TABLE IF NOT EXISTS name_replacements (
 
 CREATE TABLE IF NOT EXISTS position_eligibility (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   source TEXT NOT NULL,
   position TEXT NOT NULL,
@@ -153,6 +162,7 @@ CREATE TABLE IF NOT EXISTS position_eligibility (
 
 CREATE TABLE IF NOT EXISTS injuries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   team TEXT,
   position TEXT,
@@ -165,6 +175,7 @@ CREATE TABLE IF NOT EXISTS injuries (
 
 CREATE TABLE IF NOT EXISTS espn_rank (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   name TEXT NOT NULL,
   espn_id INTEGER,
   adp_rank INTEGER,
@@ -172,11 +183,13 @@ CREATE TABLE IF NOT EXISTS espn_rank (
 );
 
 CREATE TABLE IF NOT EXISTS player_notes (
-  name TEXT PRIMARY KEY,
+  player_id INTEGER PRIMARY KEY REFERENCES players(id),
   note TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_espn_rank_name ON espn_rank(name);
+CREATE INDEX IF NOT EXISTS idx_espn_rank_player_id ON espn_rank(player_id);
 CREATE INDEX IF NOT EXISTS idx_injuries_name ON injuries(name);
+CREATE INDEX IF NOT EXISTS idx_injuries_player_id ON injuries(player_id);
 CREATE INDEX IF NOT EXISTS idx_position_eligibility_name ON position_eligibility(name);
-CREATE INDEX IF NOT EXISTS idx_player_notes_name ON player_notes(name);
+CREATE INDEX IF NOT EXISTS idx_position_eligibility_player_id ON position_eligibility(player_id);

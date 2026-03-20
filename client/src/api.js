@@ -27,7 +27,7 @@ export const api = {
   addNameReplacement: (alt, canonical) => json('/config/name-replacements', { method: 'POST', body: JSON.stringify({ alt_name: alt, canonical_name: canonical }) }),
   deleteNameReplacement: (id) => json(`/config/name-replacements/${id}`, { method: 'DELETE' }),
   scrape: (source) => json(`/scrape/${source}`, { method: 'POST' }),
-  updatePlayerNote: (name, note) => json('/rankings/notes', { method: 'PUT', body: JSON.stringify({ name, note }) }),
+  updatePlayerNote: (playerId, note) => json('/rankings/notes', { method: 'PUT', body: JSON.stringify({ player_id: playerId, note }) }),
   getFreshness: () => json('/config/app').then(configs => {
     const freshness = {};
     for (const c of configs) {

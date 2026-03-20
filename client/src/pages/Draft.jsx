@@ -103,9 +103,9 @@ export default function Draft() {
     ...r, _taken: takenNames.has(r.name),
   }));
 
-  const handleNoteChange = useCallback((name, note) => {
-    api.updatePlayerNote(name, note);
-    setRankings(prev => prev.map(p => p.name === name ? { ...p, note } : p));
+  const handleNoteChange = useCallback((playerId, note) => {
+    api.updatePlayerNote(playerId, note);
+    setRankings(prev => prev.map(p => p.player_id === playerId ? { ...p, note } : p));
   }, []);
 
   const handleDraft = useCallback(async (player) => {
