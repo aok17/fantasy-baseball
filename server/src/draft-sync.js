@@ -145,7 +145,8 @@ export class DraftSync {
     const fullToken = `${gameId}:${leagueId}:${teamId}:${memberId}:${token}`;
 
     const nocache = Math.floor(Math.random() * 1e6);
-    const wsUrl = `wss://fantasydraft.espn.com/game-${gameId}/league-${leagueId}/JOIN?1=${gameId}&2=${leagueId}&3=${teamId}&4=${encodeURIComponent(memberId)}&5=${encodeURIComponent(fullToken)}&6=false&7=false&8=KONA&nocache=${nocache}`;
+    // ESPN's draft server requires unencoded curly braces and colons in the URL
+    const wsUrl = `wss://fantasydraft.espn.com/game-${gameId}/league-${leagueId}/JOIN?1=${gameId}&2=${leagueId}&3=${teamId}&4=${memberId}&5=${fullToken}&6=false&7=false&8=KONA&nocache=${nocache}`;
 
     console.log(`[DraftSync] Connecting to ${wsUrl.substring(0, 80)}...`);
     this._connect(wsUrl, cookies);
