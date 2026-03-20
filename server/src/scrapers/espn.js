@@ -42,8 +42,10 @@ export async function fetchEspn(db) {
     },
   });
   if (!res.ok) throw new Error(`ESPN fetch failed: ${res.status}`);
-  const json = await res.json();
+  let json = await res.json();
   const players = parseEspnResponse(json);
+  // Free the large ESPN response from memory (~30MB)
+  json = null;
 
   if (players.length === 0) {
     console.warn('ESPN returned 0 players — keeping existing data');

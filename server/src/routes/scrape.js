@@ -74,8 +74,11 @@ export function createScrapeRouter(db) {
       results.injuries = await fetchInjuries(db);
       setLastRefreshed(db, 'injuries');
     } catch (e) { results.injuries = { error: e.message }; }
-    rescoreAll(db);
+    // Respond first, then rescore — frees scrape memory before rescore runs
     res.json(results);
+    setImmediate(() => {
+      try { rescoreAll(db); } catch (e) { console.error('rescoreAll failed:', e); }
+    });
   });
 
   return router;

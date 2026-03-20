@@ -31,29 +31,33 @@ export async function fetchSavant(db) {
     { season: currentYear, gameType: 'S', seasonType: 'spring' },
   ];
 
-  const allRows = [];
+  // Delete all existing data first
+  db.prepare('DELETE FROM statcast_pitches').run();
+
+  const insert = db.prepare(`INSERT INTO statcast_pitches
+    (player_id, player_name, season, season_type, pitch_type, velocity, spin_rate, whiff_pct, barrel_pct, xwoba)
+    VALUES (@player_id, @player_name, @season, @season_type, @pitch_type, @velocity, @spin_rate, @whiff_pct, @barrel_pct, @xwoba)`);
+
+  let total = 0;
   for (const { season, gameType, seasonType } of fetches) {
     const url = `https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfGT=${gameType}%7C&hfSea=${season}%7C&player_type=pitcher&min_pitches=0&min_results=0&group_by=pitch-type&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc&min_pas=0`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Savant fetch failed for ${season} ${seasonType}: ${res.status}`);
     const csv = await res.text();
     const rows = await parseSavantCsv(csv, season, seasonType);
-    allRows.push(...rows);
+
+    // Insert this season's data in its own transaction, then discard
+    if (rows.length > 0) {
+      db.transaction(() => {
+        for (const r of rows) insert.run(r);
+      })();
+    }
+    total += rows.length;
   }
 
-  if (allRows.length === 0) {
-    console.warn('Savant returned 0 rows — keeping existing data');
-    return { rows: 0, skipped: true };
+  if (total === 0) {
+    console.warn('Savant returned 0 rows across all seasons');
   }
 
-  const insert = db.prepare(`INSERT INTO statcast_pitches
-    (player_id, player_name, season, season_type, pitch_type, velocity, spin_rate, whiff_pct, barrel_pct, xwoba)
-    VALUES (@player_id, @player_name, @season, @season_type, @pitch_type, @velocity, @spin_rate, @whiff_pct, @barrel_pct, @xwoba)`);
-
-  db.transaction(() => {
-    db.prepare('DELETE FROM statcast_pitches').run();
-    for (const r of allRows) insert.run(r);
-  })();
-
-  return { rows: allRows.length };
+  return { rows: total };
 }
