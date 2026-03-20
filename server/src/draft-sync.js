@@ -174,6 +174,7 @@ export class DraftSync {
           this.ws.send(`PING ${Date.now()}`);
         }
       }, 30000);
+      this._scheduleSmack();
     });
 
     this.ws.on('message', (data) => {
@@ -249,6 +250,21 @@ export class DraftSync {
     }
   }
 
+  _scheduleSmack() {
+    clearTimeout(this._smackTimeout);
+    // Poisson process with λ = 1/5min: inter-arrival times are exponential
+    // -ln(U) / λ where U ~ Uniform(0,1), λ = 1/(5*60*1000)
+    const lambda = 1 / (5 * 60 * 1000);
+    const delay = Math.min(-Math.log(1 - Math.random()) / lambda, 15 * 60 * 1000);
+    this._smackTimeout = setTimeout(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send('CHAT smack');
+        console.log('[DraftSync] smack');
+      }
+      if (!this._stopped) this._scheduleSmack();
+    }, delay);
+  }
+
   stop() {
     this._stopped = true;
     if (this.ws) {
@@ -257,6 +273,7 @@ export class DraftSync {
     }
     clearInterval(this._pingInterval);
     clearTimeout(this._reconnectTimeout);
+    clearTimeout(this._smackTimeout);
     this.connected = false;
     console.log('[DraftSync] Stopped');
   }
