@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import { DraftSync } from '../draft-sync.js';
 
 export function createDraftRouter(db) {
   const router = Router();
+  let activeSyncs = {};
 
   router.get('/sessions', (req, res) => {
     res.json(db.prepare('SELECT * FROM draft_sessions ORDER BY created_at DESC').all());
@@ -37,6 +39,40 @@ export function createDraftRouter(db) {
   router.delete('/picks/:id', (req, res) => {
     db.prepare('DELETE FROM draft_picks WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
+  });
+
+  // --- Sync endpoints ---
+
+  router.post('/sessions/:id/sync/start', async (req, res) => {
+    const sessionId = Number(req.params.id);
+    if (activeSyncs[sessionId]) {
+      return res.json({ ok: true, message: 'already running', ...activeSyncs[sessionId].status() });
+    }
+    try {
+      const sync = new DraftSync(db, sessionId);
+      await sync.start();
+      activeSyncs[sessionId] = sync;
+      res.json({ ok: true, ...sync.status() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/sessions/:id/sync/stop', (req, res) => {
+    const sessionId = Number(req.params.id);
+    const sync = activeSyncs[sessionId];
+    if (sync) {
+      sync.stop();
+      delete activeSyncs[sessionId];
+    }
+    res.json({ ok: true });
+  });
+
+  router.get('/sessions/:id/sync/status', (req, res) => {
+    const sessionId = Number(req.params.id);
+    const sync = activeSyncs[sessionId];
+    if (!sync) return res.json({ connected: false, pickCount: 0, lastPick: null, onTheClock: null, error: null });
+    res.json(sync.status());
   });
 
   return router;
