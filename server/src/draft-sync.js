@@ -152,7 +152,13 @@ export class DraftSync {
   }
 
   _connect(wsUrl, cookies) {
-    this.ws = new WebSocket(wsUrl, { headers: { Cookie: cookies } });
+    this.ws = new WebSocket(wsUrl, {
+      headers: {
+        Cookie: cookies,
+        Origin: 'https://fantasy.espn.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
     this._wsUrl = wsUrl;
     this._wsCookies = cookies;
 
@@ -194,6 +200,11 @@ export class DraftSync {
       console.error('[DraftSync] Error:', err.message);
       this.error = err.message;
       this.connected = false;
+      // 403 = draft not started yet, don't reconnect
+      if (err.message?.includes('403')) {
+        this._stopped = true;
+        this.error = 'Draft not started yet (403) — click Start Sync when the draft begins';
+      }
     });
   }
 
