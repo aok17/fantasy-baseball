@@ -46,6 +46,35 @@ function getEspnAdp(db) {
   return adp;
 }
 
+function upsertPlayers(db, pitcherScores, batterScores) {
+  const upsert = db.prepare(`
+    INSERT INTO players (name, team) VALUES (?, ?)
+    ON CONFLICT(name, team) DO UPDATE SET team = excluded.team
+  `);
+  const updateFgId = db.prepare('UPDATE players SET fg_id = ? WHERE name = ? AND team = ?');
+  const updateMlbamByName = db.prepare('UPDATE players SET mlbam_id = ? WHERE name = ? AND mlbam_id IS NULL');
+
+  // Upsert all scored players
+  for (const p of pitcherScores) upsert.run(p.name, p.team);
+  for (const b of batterScores) upsert.run(b.name, b.team);
+
+  // Populate fg_id from raw tables
+  const fgPitchers = db.prepare('SELECT name, team, player_id FROM pitchers_raw WHERE player_id IS NOT NULL').all();
+  for (const r of fgPitchers) updateFgId.run(r.player_id, r.name, r.team);
+  const fgBatters = db.prepare('SELECT name, team, player_id FROM batters_raw WHERE player_id IS NOT NULL').all();
+  for (const r of fgBatters) updateFgId.run(r.player_id, r.name, r.team);
+
+  // Populate mlbam_id from statcast
+  const statcast = db.prepare('SELECT DISTINCT player_name, player_id FROM statcast_pitches WHERE player_id IS NOT NULL').all();
+  for (const r of statcast) updateMlbamByName.run(r.player_id, r.player_name);
+
+  // Build name→id map
+  const idMap = {};
+  const allPlayers = db.prepare('SELECT id, name, team FROM players').all();
+  for (const p of allPlayers) idMap[`${p.name}|${p.team}`] = p.id;
+  return idMap;
+}
+
 export function rescoreAll(db) {
   db.transaction(() => {
     const pitcherWeights = getWeights(db, 'pitcher');
@@ -65,7 +94,6 @@ export function rescoreAll(db) {
     `);
     for (const p of pitcherScores) insertPitcher.run(p);
 
-    // Filter out pitchers with token batter projections (< 10 PA)
     const rawBatters = db.prepare('SELECT * FROM batters_raw WHERE PA >= 10').all();
     const posRows = db.prepare('SELECT name, source, position FROM position_eligibility').all();
     const positionsMap = {};
@@ -85,17 +113,25 @@ export function rescoreAll(db) {
     `);
     for (const b of batterScores) insertBatter.run(b);
 
+    // Upsert players and get ID map
+    const idMap = upsertPlayers(db, pitcherScores, batterScores);
+
     const espnAdp = getEspnAdp(db);
     const velocityDeltas = getVelocityDeltas(db);
     const combined = buildCombinedRankings(pitcherScores, batterScores, espnAdp, velocityDeltas);
 
     db.prepare('DELETE FROM combined_rankings').run();
     const insertCombined = db.prepare(`
-      INSERT INTO combined_rankings (rank, name, team, position, score, adj_score,
+      INSERT INTO combined_rankings (player_id, rank, name, team, position, score, adj_score,
         espn_adp, velocity_delta, velo_prev, velo_curr, velo_n, per_game_efficiency, value_gap)
-      VALUES (@rank, @name, @team, @position, @score, @adj_score,
+      VALUES (@player_id, @rank, @name, @team, @position, @score, @adj_score,
         @espn_adp, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @value_gap)
     `);
-    for (const c of combined) insertCombined.run(c);
+    for (const c of combined) {
+      insertCombined.run({
+        ...c,
+        player_id: idMap[`${c.name}|${c.team}`] || null,
+      });
+    }
   })();
 }
