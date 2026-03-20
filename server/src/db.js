@@ -56,5 +56,14 @@ export function createDb(dbPath) {
     }
   } catch (e) { /* table may already be migrated */ }
 
+  // Create player_id indexes (after migrations ensure columns exist)
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_pitchers_raw_player_id ON pitchers_raw(player_id)'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_batters_raw_player_id ON batters_raw(player_id)'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_pitcher_scores_player_id ON pitcher_scores(player_id)'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_batter_scores_player_id ON batter_scores(player_id)'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_injuries_player_id ON injuries(player_id)'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_espn_rank_player_id ON espn_rank(player_id)'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_position_eligibility_player_id ON position_eligibility(player_id)'); } catch (e) {}
+
   return db;
 }

@@ -103,12 +103,8 @@ CREATE TABLE IF NOT EXISTS combined_rankings (
 
 CREATE INDEX IF NOT EXISTS idx_combined_player_id ON combined_rankings(player_id);
 CREATE INDEX IF NOT EXISTS idx_pitchers_raw_name ON pitchers_raw(name, team);
-CREATE INDEX IF NOT EXISTS idx_pitchers_raw_player_id ON pitchers_raw(player_id);
 CREATE INDEX IF NOT EXISTS idx_batters_raw_name ON batters_raw(name, team);
-CREATE INDEX IF NOT EXISTS idx_batters_raw_player_id ON batters_raw(player_id);
 CREATE INDEX IF NOT EXISTS idx_statcast_name ON statcast_pitches(player_name);
-CREATE INDEX IF NOT EXISTS idx_pitcher_scores_player_id ON pitcher_scores(player_id);
-CREATE INDEX IF NOT EXISTS idx_batter_scores_player_id ON batter_scores(player_id);
 
 CREATE TABLE IF NOT EXISTS draft_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,8 +184,5 @@ CREATE TABLE IF NOT EXISTS player_notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_espn_rank_name ON espn_rank(name);
-CREATE INDEX IF NOT EXISTS idx_espn_rank_player_id ON espn_rank(player_id);
 CREATE INDEX IF NOT EXISTS idx_injuries_name ON injuries(name);
-CREATE INDEX IF NOT EXISTS idx_injuries_player_id ON injuries(player_id);
 CREATE INDEX IF NOT EXISTS idx_position_eligibility_name ON position_eligibility(name);
-CREATE INDEX IF NOT EXISTS idx_position_eligibility_player_id ON position_eligibility(player_id);
