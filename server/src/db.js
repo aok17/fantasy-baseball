@@ -20,8 +20,10 @@ export function createDb(dbPath) {
   db.exec(schema);
   seedDefaults(db);
 
-  // Migration: add espn_id column if missing (for existing DBs)
+  // Migrations for existing DBs
   try { db.exec('ALTER TABLE espn_rank ADD COLUMN espn_id INTEGER'); } catch (e) { /* column already exists */ }
+  try { db.exec('ALTER TABLE combined_rankings RENAME COLUMN espn_adp TO espn_rank'); } catch (e) { /* already renamed or doesn't exist */ }
+  try { db.exec('ALTER TABLE espn_adp RENAME TO espn_rank'); } catch (e) { /* already renamed */ }
 
   return db;
 }
