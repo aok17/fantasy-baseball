@@ -37,10 +37,7 @@ export async function fetchEspn(db) {
   const res = await fetch(url, {
     headers: {
       'x-fantasy-filter': JSON.stringify({
-        players: {
-          limit: 1500,
-          sortPercOwned: { sortAsc: false, sortPriority: 1 },
-        },
+        players: { limit: 1500, sortPercOwned: { sortAsc: false, sortPriority: 1 } },
       }),
     },
   });
@@ -48,22 +45,21 @@ export async function fetchEspn(db) {
   const json = await res.json();
   const players = parseEspnResponse(json);
 
+  if (players.length === 0) {
+    console.warn('ESPN returned 0 players — keeping existing data');
+    return { players: 0, positions: 0, skipped: true };
+  }
+
   const replacements = loadReplacements(db);
   const accentMap = buildAccentMap(db);
   const source = `espn_${year}`;
 
-  // For duplicate names (e.g. two "Julio Rodriguez"), only accent-map the
-  // one with the highest projected points — that's the star player that
-  // FanGraphs has projections for. The minor leaguer keeps the ASCII name.
   const bestByName = {};
   for (const p of players) {
     const n = reconcileName(p.name, replacements);
     const pts = p.projected_points || 0;
     if (!bestByName[n] || pts > bestByName[n]) bestByName[n] = pts;
   }
-
-  db.prepare('DELETE FROM espn_adp').run();
-  db.prepare('DELETE FROM position_eligibility WHERE source = ?').run(source);
 
   const insertAdp = db.prepare(
     'INSERT INTO espn_adp (name, adp_rank, projected_points) VALUES (?, ?, ?)'
@@ -72,16 +68,20 @@ export async function fetchEspn(db) {
     'INSERT OR IGNORE INTO position_eligibility (name, source, position) VALUES (?, ?, ?)'
   );
 
-  for (const p of players) {
-    let name = reconcileName(p.name, replacements);
-    // Only accent-map if this is the best player with this name
-    const pts = p.projected_points || 0;
-    if (accentMap[name] && pts >= bestByName[name]) name = accentMap[name];
-    insertAdp.run(name, p.adp_rank, p.projected_points);
-    for (const pos of p.positions) {
-      insertPos.run(name, source, pos);
+  db.transaction(() => {
+    db.prepare('DELETE FROM espn_adp').run();
+    db.prepare('DELETE FROM position_eligibility WHERE source = ?').run(source);
+
+    for (const p of players) {
+      let name = reconcileName(p.name, replacements);
+      const pts = p.projected_points || 0;
+      if (accentMap[name] && pts >= bestByName[name]) name = accentMap[name];
+      insertAdp.run(name, p.adp_rank, p.projected_points);
+      for (const pos of p.positions) {
+        insertPos.run(name, source, pos);
+      }
     }
-  }
+  })();
 
   return { players: players.length, positions: players.filter(p => p.positions.length > 0).length };
 }

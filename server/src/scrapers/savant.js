@@ -18,32 +18,42 @@ export async function parseSavantCsv(csvText, season, seasonType) {
     velocity: num(r.velocity),
     spin_rate: num(r.spin_rate),
     whiff_pct: num(r.whiff_percent) ?? num(r.whiffs),
-    barrel_pct: num(r.barrel_batted_rate),
+    barrel_pct: num(r.barrels_per_bbe_percent) ?? num(r.barrel_batted_rate),
     xwoba: num(r.xwoba),
   }));
 }
 
 export async function fetchSavant(db) {
+  const row = db.prepare("SELECT value FROM app_config WHERE key = 'season_year'").get();
+  const currentYear = Number(row?.value) || new Date().getFullYear();
   const fetches = [
-    { season: 2024, gameType: 'R', seasonType: 'regular' },
-    { season: 2025, gameType: 'ST', seasonType: 'spring' },
+    { season: currentYear - 1, gameType: 'R', seasonType: 'regular' },
+    { season: currentYear, gameType: 'S', seasonType: 'spring' },
   ];
 
-  db.prepare('DELETE FROM statcast_pitches').run();
-  const insert = db.prepare(`INSERT INTO statcast_pitches
-    (player_id, player_name, season, season_type, pitch_type, velocity, spin_rate, whiff_pct, barrel_pct, xwoba)
-    VALUES (@player_id, @player_name, @season, @season_type, @pitch_type, @velocity, @spin_rate, @whiff_pct, @barrel_pct, @xwoba)`);
-
-  let total = 0;
+  const allRows = [];
   for (const { season, gameType, seasonType } of fetches) {
-    const url = `https://baseballsavant.mlb.com/leaderboard/custom?n=abs&stats=pit&qual=1&type=1&season=${season}&month=0&game_type=${gameType}&min=10&csv=true`;
+    const url = `https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfGT=${gameType}%7C&hfSea=${season}%7C&player_type=pitcher&min_pitches=0&min_results=0&group_by=pitch-type&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc&min_pas=0`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Savant fetch failed for ${season} ${seasonType}: ${res.status}`);
     const csv = await res.text();
     const rows = await parseSavantCsv(csv, season, seasonType);
-    for (const r of rows) insert.run(r);
-    total += rows.length;
+    allRows.push(...rows);
   }
 
-  return { rows: total };
+  if (allRows.length === 0) {
+    console.warn('Savant returned 0 rows — keeping existing data');
+    return { rows: 0, skipped: true };
+  }
+
+  const insert = db.prepare(`INSERT INTO statcast_pitches
+    (player_id, player_name, season, season_type, pitch_type, velocity, spin_rate, whiff_pct, barrel_pct, xwoba)
+    VALUES (@player_id, @player_name, @season, @season_type, @pitch_type, @velocity, @spin_rate, @whiff_pct, @barrel_pct, @xwoba)`);
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM statcast_pitches').run();
+    for (const r of allRows) insert.run(r);
+  })();
+
+  return { rows: allRows.length };
 }
