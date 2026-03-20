@@ -52,3 +52,44 @@ describe('rescoreAll', () => {
     expect(rows[1].rank).toBe(2);
   });
 });
+
+describe('rescoreAll edge cases', () => {
+  let db;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    const schema = readFileSync(join(__dirname, '..', '..', 'src', 'schema.sql'), 'utf8');
+    db.exec(schema);
+    seedDefaults(db);
+  });
+
+  afterEach(() => { db.close(); });
+
+  it('handles empty pitchers_raw gracefully', () => {
+    // Only insert batter, no pitcher
+    db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS)
+      VALUES ('Test OF', 'LAD', 150, 600, 550, 160, 30, 5, 35, 95, 100, 60, 130, 5, 15, 3)`).run();
+    db.prepare(`INSERT INTO position_eligibility (name, source, position) VALUES ('Test OF', 'espn_2025', 'OF')`).run();
+    rescoreAll(db);
+    const rows = db.prepare('SELECT * FROM combined_rankings ORDER BY rank').all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('Test OF');
+  });
+
+  it('handles missing position_eligibility gracefully', () => {
+    db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS)
+      VALUES ('Test OF', 'LAD', 150, 600, 550, 160, 30, 5, 35, 95, 100, 60, 130, 5, 15, 3)`).run();
+    // No position_eligibility rows
+    rescoreAll(db);
+    const rows = db.prepare('SELECT * FROM batter_scores').all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].position).toBe('Other');
+  });
+
+  it('handles empty database gracefully', () => {
+    // No raw data at all
+    rescoreAll(db);
+    const rows = db.prepare('SELECT * FROM combined_rankings').all();
+    expect(rows).toHaveLength(0);
+  });
+});
