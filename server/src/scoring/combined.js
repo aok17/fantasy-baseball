@@ -41,9 +41,15 @@ export function buildCombinedRankings(pitcherScores, batterScores, espnRank, vel
     return a.name.localeCompare(b.name);
   });
 
-  return rows.map((row, i) => ({
-    ...row,
-    rank: i + 1,
-    value_gap: row.espn_rank != null ? (i + 1) - row.espn_rank : null,
-  }));
+  const posCount = {};
+  return rows.map((row, i) => {
+    const primary = row.position?.split(',')[0]?.trim() || 'DH';
+    posCount[primary] = (posCount[primary] || 0) + 1;
+    return {
+      ...row,
+      rank: i + 1,
+      pos_rank: posCount[primary],
+      value_gap: row.espn_rank != null ? (i + 1) - row.espn_rank : null,
+    };
+  });
 }

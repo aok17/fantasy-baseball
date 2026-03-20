@@ -149,9 +149,9 @@ export function rescoreAll(db) {
     db.prepare('DELETE FROM combined_rankings').run();
     const insertCombined = db.prepare(`
       INSERT INTO combined_rankings (player_id, rank, name, team, position, score, adj_score,
-        espn_rank, velocity_delta, velo_prev, velo_curr, velo_n, per_game_efficiency, value_gap)
+        espn_rank, velocity_delta, velo_prev, velo_curr, velo_n, per_game_efficiency, pos_rank, value_gap)
       VALUES (@player_id, @rank, @name, @team, @position, @score, @adj_score,
-        @espn_rank, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @value_gap)
+        @espn_rank, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @pos_rank, @value_gap)
     `);
     for (const c of combined) insertCombined.run(c);
   })();

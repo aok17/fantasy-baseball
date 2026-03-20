@@ -13,7 +13,7 @@ const num3 = ({ getValue }) => { const v = getValue(); return v != null ? v.toFi
 
 // Columns with numeric data get right-aligned
 const NUMERIC_ACCESSORS = new Set([
-  'score', 'adj_score', 'per_game_efficiency', 'espn_rank', 'value_gap',
+  'pos_rank', 'score', 'adj_score', 'per_game_efficiency', 'espn_rank', 'value_gap',
   'velo_prev', 'velo_curr', 'velo_n', 'velocity_delta',
   'ip', 'gs', 'pit_g', 'k9', 'bb9', 'era', 'whip', 'fip', 'pit_so', 'pit_bb',
   'W', 'L', 'QS', 'SV', 'hld', 'pit_war',
@@ -94,6 +94,7 @@ export const ALL_COLUMNS = [
     cell: NotesCell,
   },
   // Scoring
+  { accessorKey: 'pos_rank', header: 'PRk', size: 46, cell: raw, group: 'scoring', filterFn: columnFilterFn },
   { accessorKey: 'score', header: 'Score', size: 64, cell: num1, group: 'scoring', filterFn: columnFilterFn },
   { accessorKey: 'adj_score', header: 'Adj', size: 60, cell: num1, group: 'scoring', filterFn: columnFilterFn },
   { accessorKey: 'per_game_efficiency', header: 'Pts/G', size: 58, cell: num2, group: 'scoring', filterFn: columnFilterFn },
@@ -148,7 +149,7 @@ const STORAGE_KEY = 'fantasy-bb-visible-cols';
 
 const DEFAULT_VISIBLE = new Set([
   'rank', 'name', 'team', 'position',
-  'score', 'adj_score', 'per_game_efficiency',
+  'pos_rank', 'score', 'adj_score', 'per_game_efficiency',
   'espn_rank', 'value_gap',
   'velo_prev', 'velo_curr', 'velo_n', 'velocity_delta',
   'ip', 'gs', 'k9',

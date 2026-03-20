@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS combined_rankings (
   velo_curr REAL,
   velo_n INTEGER,
   per_game_efficiency REAL,
+  pos_rank INTEGER,
   value_gap INTEGER
 );
 

@@ -37,6 +37,7 @@ export function createDb(dbPath) {
   try { db.exec('ALTER TABLE injuries ADD COLUMN player_id INTEGER REFERENCES players(id)'); } catch (e) { /* already exists */ }
   try { db.exec('ALTER TABLE espn_rank ADD COLUMN player_id INTEGER REFERENCES players(id)'); } catch (e) { /* already exists */ }
   try { db.exec('ALTER TABLE position_eligibility ADD COLUMN player_id INTEGER REFERENCES players(id)'); } catch (e) { /* already exists */ }
+  try { db.exec('ALTER TABLE combined_rankings ADD COLUMN pos_rank INTEGER'); } catch (e) { /* already exists */ }
 
   // Migrate player_notes from name-keyed to player_id-keyed
   try {
