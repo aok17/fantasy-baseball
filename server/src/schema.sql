@@ -1,5 +1,18 @@
 -- server/src/schema.sql
 
+CREATE TABLE IF NOT EXISTS players (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  team TEXT,
+  fg_id TEXT,
+  mlbam_id TEXT,
+  UNIQUE(name, team)
+);
+
+CREATE INDEX IF NOT EXISTS idx_players_name ON players(name);
+CREATE INDEX IF NOT EXISTS idx_players_fg_id ON players(fg_id);
+CREATE INDEX IF NOT EXISTS idx_players_mlbam_id ON players(mlbam_id);
+
 CREATE TABLE IF NOT EXISTS pitchers_raw (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -68,6 +81,7 @@ CREATE TABLE IF NOT EXISTS batter_scores (
 
 CREATE TABLE IF NOT EXISTS combined_rankings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
   rank INTEGER,
   name TEXT NOT NULL,
   team TEXT,
@@ -82,6 +96,11 @@ CREATE TABLE IF NOT EXISTS combined_rankings (
   per_game_efficiency REAL,
   value_gap INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS idx_combined_player_id ON combined_rankings(player_id);
+CREATE INDEX IF NOT EXISTS idx_pitchers_raw_name ON pitchers_raw(name, team);
+CREATE INDEX IF NOT EXISTS idx_batters_raw_name ON batters_raw(name, team);
+CREATE INDEX IF NOT EXISTS idx_statcast_name ON statcast_pitches(player_name);
 
 CREATE TABLE IF NOT EXISTS draft_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,9 +151,31 @@ CREATE TABLE IF NOT EXISTS position_eligibility (
   UNIQUE(name, source, position)
 );
 
+CREATE TABLE IF NOT EXISTS injuries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  team TEXT,
+  position TEXT,
+  injury TEXT,
+  status TEXT,
+  latest_update TEXT,
+  mlbam_id TEXT,
+  UNIQUE(name, team)
+);
+
 CREATE TABLE IF NOT EXISTS espn_adp (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   adp_rank INTEGER,
   projected_points REAL
 );
+
+CREATE TABLE IF NOT EXISTS player_notes (
+  name TEXT PRIMARY KEY,
+  note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_espn_adp_name ON espn_adp(name);
+CREATE INDEX IF NOT EXISTS idx_injuries_name ON injuries(name);
+CREATE INDEX IF NOT EXISTS idx_position_eligibility_name ON position_eligibility(name);
+CREATE INDEX IF NOT EXISTS idx_player_notes_name ON player_notes(name);
