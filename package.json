@@ -1,5 +1,9 @@
 {
   "name": "fantasy-baseball",
   "private": true,
-  "workspaces": ["server", "client"]
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "echo 'Run server and client separately: cd server && npm run dev, cd client && npm run dev'",
+    "build": "cd client && npm run build"
+  }
 }

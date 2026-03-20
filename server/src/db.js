@@ -7,7 +7,11 @@ import { seedDefaults } from './seed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export function createDb(dbPath = join(__dirname, '..', '..', 'fantasy-baseball.db')) {
+export function createDb(dbPath) {
+  // Use DATABASE_PATH env var (for Fly.io volume), fall back to local file
+  if (!dbPath) {
+    dbPath = process.env.DATABASE_PATH || join(__dirname, '..', '..', 'fantasy-baseball.db');
+  }
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
