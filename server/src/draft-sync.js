@@ -94,9 +94,10 @@ async function getGameId(leagueId, cookies, year) {
  *   sync.status();       // { connected, pickCount, lastPick, onTheClock, error }
  */
 export class DraftSync {
-  constructor(db, sessionId) {
+  constructor(db, sessionId, { leagueOverride } = {}) {
     this.db = db;
     this.sessionId = sessionId;
+    this.leagueOverride = leagueOverride || null;
     this.ws = null;
     this.playerMap = null;
     this.teamMap = null;
@@ -123,7 +124,7 @@ export class DraftSync {
   }
 
   async start() {
-    const leagueId = this._getConfig('espn_league_id');
+    const leagueId = this.leagueOverride || this._getConfig('espn_league_id');
     const teamId = Number(this._getConfig('espn_team_id'));
     if (!leagueId || !teamId) throw new Error('espn_league_id and espn_team_id must be set in app_config');
 

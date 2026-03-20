@@ -49,7 +49,8 @@ export function createDraftRouter(db) {
       return res.json({ ok: true, message: 'already running', ...activeSyncs[sessionId].status() });
     }
     try {
-      const sync = new DraftSync(db, sessionId);
+      const { leagueId } = req.body || {};
+      const sync = new DraftSync(db, sessionId, { leagueOverride: leagueId || null });
       await sync.start();
       activeSyncs[sessionId] = sync;
       res.json({ ok: true, ...sync.status() });

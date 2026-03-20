@@ -9,6 +9,7 @@ import RosterSidebar from '../components/RosterSidebar';
 function SyncStatusBar({ sessionId }) {
   const [status, setStatus] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [leagueId, setLeagueId] = useState('');
   const intervalRef = useRef(null);
 
   useEffect(() => {
@@ -22,7 +23,7 @@ function SyncStatusBar({ sessionId }) {
   const handleStart = async () => {
     setSyncing(true);
     try {
-      const result = await api.startSync(sessionId);
+      const result = await api.startSync(sessionId, leagueId || undefined);
       setStatus(result);
     } catch (e) {
       setStatus({ connected: false, error: e.message });
@@ -55,6 +56,9 @@ function SyncStatusBar({ sessionId }) {
       ) : (
         <>
           <span className="text-gray-500">{status.error ? `Error: ${status.error}` : 'ESPN Sync Off'}</span>
+          <input value={leagueId} onChange={e => setLeagueId(e.target.value)}
+            placeholder="League ID (blank=default)"
+            className="w-40 px-1.5 py-0.5 border border-gray-300 rounded text-xs" />
           <button onClick={handleStart} disabled={syncing}
             className="text-blue-600 hover:text-blue-800 ml-auto disabled:opacity-50">
             {syncing ? 'Connecting...' : 'Start Sync'}

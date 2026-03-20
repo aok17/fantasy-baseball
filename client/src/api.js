@@ -37,7 +37,7 @@ export const api = {
     }
     return freshness;
   }),
-  startSync: (sessionId) => json(`/draft/sessions/${sessionId}/sync/start`, { method: 'POST' }),
+  startSync: (sessionId, leagueId) => json(`/draft/sessions/${sessionId}/sync/start`, { method: 'POST', body: JSON.stringify({ leagueId }) }),
   stopSync: (sessionId) => json(`/draft/sessions/${sessionId}/sync/stop`, { method: 'POST' }),
   getSyncStatus: (sessionId) => json(`/draft/sessions/${sessionId}/sync/status`),
 };
