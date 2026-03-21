@@ -173,8 +173,8 @@ export class DraftSync {
         if (this.ws?.readyState === WebSocket.OPEN) {
           this.ws.send(`PING ${Date.now()}`);
         }
-      }, 30000);
-      this._scheduleSmack();
+      }, 10000);
+      if (!this._smackTimeout) this._scheduleSmack();
     });
 
     this.ws.on('message', (data) => {
