@@ -258,8 +258,10 @@ export class DraftSync {
     const delay = Math.min(-Math.log(1 - Math.random()) / lambda, 15 * 60 * 1000);
     this._smackTimeout = setTimeout(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send('CHAT smack');
-        console.log('[DraftSync] smack');
+        this.ws.send('CHAT smack\n', (err) => {
+          if (err) console.error('[DraftSync] smack send failed:', err.message);
+          else console.log('[DraftSync] smack sent ok, readyState:', this.ws?.readyState);
+        });
       }
       if (!this._stopped) this._scheduleSmack();
     }, delay);
