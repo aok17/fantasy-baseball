@@ -1,4 +1,5 @@
 import { computePitcherScores } from './pitcher-scoring.js';
+import { computePitcherModel } from './pitcher-model.js';
 import { computeBatterScores, resolvePosition } from './batter-scoring.js';
 import { buildCombinedRankings } from './combined.js';
 
@@ -86,11 +87,27 @@ function upsertPlayers(db, pitcherScores, batterScores) {
       SELECT p.id FROM players p WHERE p.name = batters_raw.name AND p.team = batters_raw.team
     ) WHERE player_id IS NULL;
     UPDATE espn_rank SET player_id = (
-      SELECT p.id FROM players p WHERE p.name = espn_rank.name
+      SELECT p.id FROM players p WHERE p.name = espn_rank.name AND p.team IS NOT NULL
+      ORDER BY p.fg_id IS NOT NULL DESC LIMIT 1
     ) WHERE player_id IS NULL;
     UPDATE injuries SET player_id = (
       SELECT p.id FROM players p WHERE p.name = injuries.name AND p.team = injuries.team
     ) WHERE player_id IS NULL;
+  `);
+
+  // Copy espn_id from espn_rank to players for ID-based matching
+  // Always re-derive (not WHERE NULL) in case ESPN data changed
+  db.exec(`
+    UPDATE players SET espn_id = (
+      SELECT er.espn_id FROM espn_rank er WHERE er.player_id = players.id AND er.espn_id IS NOT NULL
+    );
+  `);
+
+  // Match position_eligibility via espn_id (handles name collisions like two "Julio Rodriguez")
+  db.exec(`
+    UPDATE position_eligibility SET player_id = (
+      SELECT p.id FROM players p WHERE p.espn_id = position_eligibility.espn_id
+    ) WHERE player_id IS NULL AND espn_id IS NOT NULL;
     UPDATE position_eligibility SET player_id = (
       SELECT p.id FROM players p WHERE p.name = position_eligibility.name
     ) WHERE player_id IS NULL;
@@ -110,6 +127,13 @@ export function rescoreAll(db) {
     const pitcherScores = computePitcherScores(rawPitchers, pitcherWeights, replacementLevel);
 
     const rawBatters = db.prepare('SELECT * FROM batters_raw WHERE PA >= 10').all();
+
+    // Upsert players and populate player_id FKs on satellite tables FIRST,
+    // so position_eligibility.player_id is set via espn_id before we read it.
+    // We need a preliminary batter score pass to get player names/teams.
+    const idMap = upsertPlayers(db, pitcherScores, rawBatters);
+
+    // NOW read position_eligibility with player_ids properly linked
     const posRows = db.prepare('SELECT player_id, name, source, position FROM position_eligibility').all();
     const positionsMap = {};
     for (const row of posRows) {
@@ -119,12 +143,10 @@ export function rescoreAll(db) {
     }
     const battersWithPos = rawBatters.map(b => {
       const key = b.player_id || b.name;
-      return { ...b, position: resolvePosition(positionsMap[key] || positionsMap[b.name] || []) };
+      const pid = idMap[`${b.name}|${b.team}`];
+      return { ...b, position: resolvePosition(positionsMap[pid] || positionsMap[key] || positionsMap[b.name] || []) };
     });
     const batterScores = computeBatterScores(battersWithPos, batterWeights, posAdj);
-
-    // Upsert players and populate player_id FKs on satellite tables
-    const idMap = upsertPlayers(db, pitcherScores, batterScores);
 
     db.prepare('DELETE FROM pitcher_scores').run();
     const insertPitcher = db.prepare(`
@@ -154,5 +176,8 @@ export function rescoreAll(db) {
         @espn_rank, @velocity_delta, @velo_prev, @velo_curr, @velo_n, @per_game_efficiency, @pos_rank, @value_gap)
     `);
     for (const c of combined) insertCombined.run(c);
+
+    // Recompute pitcher model if start data exists
+    try { computePitcherModel(db); } catch (e) { console.error('Pitcher model computation failed:', e); }
   })();
 }

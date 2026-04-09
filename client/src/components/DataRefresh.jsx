@@ -3,9 +3,12 @@ import { api } from '../api';
 
 const SOURCES = [
   { key: 'fangraphs', label: 'FanGraphs Projections' },
+  { key: 'fangraphs-actual', label: 'FanGraphs Actual' },
   { key: 'savant', label: 'Baseball Savant' },
   { key: 'espn', label: 'ESPN ADP' },
   { key: 'injuries', label: 'Injury Report' },
+  { key: 'rosters', label: 'League Rosters' },
+  { key: 'pitcher-starts', label: 'Pitcher Model' },
 ];
 
 export default function DataRefresh() {
@@ -32,6 +35,13 @@ export default function DataRefresh() {
         setStatus(prev => ({ ...prev, [s.key]: `Error: ${e.message}` }));
       }
     }
+    // Rescore after all scrapes
+    try {
+      await api.scrape('rescore');
+      setStatus(prev => ({ ...prev, rescore: 'Done' }));
+    } catch (e) {
+      setStatus(prev => ({ ...prev, rescore: `Error: ${e.message}` }));
+    }
   };
 
   return (
@@ -46,6 +56,14 @@ export default function DataRefresh() {
           {status[s.key] && <span className="text-xs text-gray-500">{status[s.key]}</span>}
         </div>
       ))}
+      <div className="flex items-center gap-3">
+        <button onClick={() => run('rescore')}
+          disabled={status.rescore === 'loading'}
+          className="px-3 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300 disabled:opacity-50">
+          Rescore Rankings
+        </button>
+        {status.rescore && <span className="text-xs text-gray-500">{status.rescore}</span>}
+      </div>
       <button onClick={runAll} disabled={status.all === 'loading'}
         className="px-3 py-1 bg-blue-600 text-white text-sm rounded disabled:opacity-50">
         Refresh All
