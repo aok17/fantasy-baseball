@@ -36,10 +36,14 @@ export function seedDefaults(db) {
     'INSERT OR IGNORE INTO app_config (key, value) VALUES (?, ?)'
   );
   insertConfig.run('replacement_level', '237');
-  insertConfig.run('projection_system', 'steamer');
+  insertConfig.run('projection_system', 'fangraphsdc');
   insertConfig.run('season_year', '2026');
   insertConfig.run('espn_league_id', '133164');
   insertConfig.run('espn_team_id', '7');
   insertConfig.run('espn_bot_swid', process.env.ESPN_BOT_SWID || '');
   insertConfig.run('espn_bot_s2', process.env.ESPN_BOT_S2 || '');
+  insertConfig.run('lg_babip', '0.300');
+  insertConfig.run('lg_hr_fb', '0.095');
+  insertConfig.run('lg_runs_per_game', '4.5');
+  insertConfig.run('fip_constant', '3.15');
 }
