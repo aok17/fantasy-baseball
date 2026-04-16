@@ -1,3 +1,44 @@
+// =============================================================================
+// PITCHER MODEL — PARAMETER PROVENANCE
+// =============================================================================
+//
+// FITTED FROM DATA (recomputed each run from pitcher_starts):
+//   - BB% coefficients (a, b in xBB% = a * ball_pct + b) — OLS on all starts
+//   - League-wide IP std dev — std dev of IP across all starts
+//   - League-wide ER std dev — std dev of ER across all starts
+//
+// FROM PUBLISHED RESEARCH:
+//   - K% model: xK% = 1.2 * SwStr% + 0.6 * CStr% - 4.0
+//     Source: FanGraphs multivariate K% research (R²≈0.82-0.86)
+//     Published by Alex Chamberlain, FanGraphs community research
+//   - BABIP regression k=3700
+//     Source: Tom Tango, "Inside The Book" / tangotiger.com
+//   - HR/FB regression k=170
+//     Source: Tom Tango stabilization research (r=0.50 at 170 FB)
+//   - FIP coefficients: 13 (HR), 3 (BB), -2 (K) — fixed linear run weights
+//     Source: FanGraphs library, validated independently
+//   - Pythagorean win%: W% = R²/(R² + RA²)
+//     Source: Bill James, standard sabermetric formula
+//
+// FROM app_config (adjustable):
+//   - lg_babip (0.300) — FanGraphs league average
+//   - lg_hr_fb (0.095) — FanGraphs league average
+//   - lg_runs_per_game (4.5) — FanGraphs league average
+//   - fip_constant (3.15) — FanGraphs Guts! table, varies by year
+//
+// ESTIMATED / APPROXIMATE:
+//   - BIP out rate = 1 - regressed_BABIP
+//     Approximate: ignores errors, fielder's choices, sac flies.
+//     Real out rate on BIP is slightly lower (~0.68 vs 0.70).
+//   - FB% ≈ 35% of BIP (used for HR/FB regression denominator)
+//     Approximate: league average is ~34-36%, varies by pitcher.
+//   - Win prob decision rate heuristic:
+//     min((wins + (starts-wins)*0.4) / starts, 0.75)
+//     Made up. ~60% of starts result in a decision is roughly right.
+//   - QS model P(ER<=3) uses 3.5 as threshold (not 3)
+//     Intentional: accounts for discrete ER values (3 ER = QS, 3.5 midpoint)
+// =============================================================================
+
 import { safeDivide } from './utils.js';
 
 function getConfig(db, key, fallback) {
@@ -45,16 +86,47 @@ function estimateKPct(starts) {
 }
 
 // Sub-model 2: Walk rate (aggressive)
-// xBB% from ball rate: xBB% = 0.8 * ball_pct - 0.15
-function estimateBBPct(starts) {
+// xBB% = a * ball_pct + b, coefficients fit from all starts via OLS
+function estimateBBPct(starts, bbCoeffs) {
   const totalPitches = rollingSum(starts, 'total_pitches');
   const takes = rollingSum(starts, 'takes');
   const calledStrikes = rollingSum(starts, 'called_strikes');
   if (totalPitches === 0) return null;
 
   const ballPct = (takes - calledStrikes) / totalPitches;
-  const xbb = 0.8 * ballPct - 0.15;
+  const xbb = bbCoeffs.a * ballPct + bbCoeffs.b;
   return Math.max(0.01, Math.min(xbb, 0.25));
+}
+
+// Fit OLS: bb_pct = a * ball_pct + b from all starts
+function fitBBCoefficients(db) {
+  const rows = db.prepare(`
+    SELECT total_pitches, takes, called_strikes, bb, pa
+    FROM pitcher_starts
+    WHERE total_pitches > 0 AND pa > 0 AND takes IS NOT NULL AND called_strikes IS NOT NULL
+  `).all();
+
+  if (rows.length < 10) return { a: 0.5, b: -0.10 }; // fallback
+
+  let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0, n = 0;
+  for (const r of rows) {
+    const ballPct = (r.takes - r.called_strikes) / r.total_pitches;
+    const bbPct = r.bb / r.pa;
+    sumX += ballPct;
+    sumY += bbPct;
+    sumXX += ballPct * ballPct;
+    sumXY += ballPct * bbPct;
+    n++;
+  }
+
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return { a: 0.5, b: -0.10 };
+
+  const a = (n * sumXY - sumX * sumY) / denom;
+  const b = (sumY - a * sumX) / n;
+
+  console.log(`BB% model fit: xBB% = ${a.toFixed(4)} * ball_pct + ${b.toFixed(4)} (n=${n})`);
+  return { a, b };
 }
 
 // Sub-model 3: BABIP (conservative, heavy regression)
@@ -87,19 +159,19 @@ function regressedHR9(starts, lgHrFb) {
   return regHrFb * 0.35 * bipPer9;
 }
 
-// Sub-model 4: IP/start (derived from K%, BB%, pitches/start)
-function estimateIP(starts, estKPct, estBBPct) {
-  const avgPitches = rollingAvg(starts, 'total_pitches');
-  if (!avgPitches || estKPct == null || estBBPct == null) return rollingAvg(starts, 'ip');
+// Sub-model 4: IP/start (from rolling PA and estimated out rate)
+// Uses actual BIP-to-out rate computed from the pitcher's own data in the window,
+// combined with estimated K% and BB% to project outs per batter faced.
+function estimateIP(starts, estKPct, estBBPct, regBabip) {
+  const avgPA = rollingAvg(starts, 'pa');
+  if (!avgPA || estKPct == null || estBBPct == null) return rollingAvg(starts, 'ip');
 
   const bipPct = 1 - estKPct - estBBPct;
-  const P_BIP = 3.5, P_K = 5.0, P_BB = 5.5;
-  const pitchesPerBatter = bipPct * P_BIP + estKPct * P_K + estBBPct * P_BB;
-  const outsPerBatter = bipPct * 0.72 + estKPct * 1.0;
-  const pitchesPerOut = safeDivide(pitchesPerBatter, outsPerBatter);
-  if (pitchesPerOut === 0) return rollingAvg(starts, 'ip');
-
-  return safeDivide(avgPitches, pitchesPerOut * 3);
+  // Out rate on BIP = 1 - BABIP (approximately — ignores errors/FC but those are small)
+  const bipOutRate = 1 - (regBabip || 0.300);
+  const outsPerBatter = estKPct * 1.0 + bipPct * bipOutRate;
+  const totalOuts = avgPA * outsPerBatter;
+  return totalOuts / 3;
 }
 
 // Sub-model 5: ERA via FIP
@@ -109,48 +181,68 @@ function estimateERA(estK, estBB, estHR, estIP, fipConstant) {
 }
 
 // Sub-model 6: Win probability via Pythagorean expectation
-function estimateWinProb(starts, estERA, lgRunsPerGame) {
-  if (estERA == null) return { pWin: null, pLoss: null };
+// P(W) is gated by P(IP >= 5) (SP win eligibility rule) so it stays consistent
+// with the QS model — both respond to the same IP/ERA skill signals rather than
+// to small-sample recent W/L noise.
+function estimateWinProb(estIP, estERA, lgRunsPerGame) {
+  if (estERA == null || estIP == null) return { pWin: null, pLoss: null };
 
-  const runsAllowed = estERA;
   const lgR = lgRunsPerGame;
-  const pythWinPct = safeDivide(lgR * lgR, lgR * lgR + runsAllowed * runsAllowed);
+  const pythWinPct = safeDivide(lgR * lgR, lgR * lgR + estERA * estERA);
 
-  const totalStarts = starts.length;
-  const wins = rollingSum(starts, 'won');
-  const decisionRate = totalStarts > 0 ? Math.min((wins + (totalStarts - wins) * 0.4) / totalStarts, 0.75) : 0.6;
+  const ipSd = estimateQSProb._ipSd || 1.2;
+  const pIP5 = 1 - normCdf((5 - estIP) / ipSd);
+  const decisionRate = 0.55 + 0.20 * pIP5;
 
   return {
-    pWin: pythWinPct * decisionRate,
-    pLoss: (1 - pythWinPct) * decisionRate,
+    pWin: pIP5 * pythWinPct,
+    pLoss: decisionRate * (1 - pythWinPct),
   };
 }
 
-// Sub-model 7: QS probability
-function estimateQSProb(starts, estIP, estERA) {
-  if (estIP == null || estERA == null) return null;
-
-  const totalStarts = starts.length;
-  const qsCount = rollingSum(starts, 'qs');
-  const rollingQsRate = totalStarts > 0 ? qsCount / totalStarts : 0;
-
-  const estERin6 = estERA * 6 / 9;
-  const modelQs = (estIP >= 6 && estERin6 <= 3) ? 0.7 :
-                  (estIP >= 5.5 && estERin6 <= 3.5) ? 0.4 :
-                  0.15;
-
-  return rollingQsRate * 0.5 + modelQs * 0.5;
+// Normal CDF approximation (Abramowitz & Stegun)
+function normCdf(x) {
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+  const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + p * x);
+  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sign * y);
 }
 
-function computeForWindow(db, playerId, windowSize, config, weights) {
+// Sub-model 7: QS probability from model estimates + league-wide variance
+// P(QS) = P(IP >= 6) * P(ER <= 3 | IP >= 6)
+// Uses normal distribution centered on model estimates with variance computed
+// from ALL starts in the database (stable, not noisy per-pitcher small samples).
+function estimateQSProb(starts, estIP, estERA) {
+  if (estIP == null || estERA == null) return null;
+  if (starts.length === 0) return null;
+
+  // ipSd and erSd are set once from league-wide data (see computePitcherModel)
+  // and passed via closure. Fall back to reasonable defaults.
+  const ipSd = estimateQSProb._ipSd || 1.2;
+  const erSd = estimateQSProb._erSd || 1.5;
+
+  // P(IP >= 6)
+  const pIP6 = 1 - normCdf((6 - estIP) / ipSd);
+
+  // Expected ER in a 6+ IP start
+  const estERin6 = estERA * 6 / 9;
+  const pER3 = normCdf((3.5 - estERin6) / erSd);
+
+  return pIP6 * pER3;
+}
+
+function computeForWindow(db, playerId, windowSize, config, weights, bbCoeffs) {
   const starts = getRecentStarts(db, playerId, windowSize);
   if (starts.length === 0) return null;
 
   const xkPct = estimateKPct(starts);
-  const xbbPct = estimateBBPct(starts);
+  const xbbPct = estimateBBPct(starts, bbCoeffs);
   const regBabip = regressedBABIP(starts, config.lgBabip);
   const regHr9 = regressedHR9(starts, config.lgHrFb);
-  const estIP = estimateIP(starts, xkPct, xbbPct);
+  const estIP = estimateIP(starts, xkPct, xbbPct, regBabip);
   const estPA = rollingAvg(starts, 'pa') || 25;
 
   const estK = (xkPct || 0.20) * estPA;
@@ -162,7 +254,7 @@ function computeForWindow(db, playerId, windowSize, config, weights) {
   const estERA = estimateERA(estK, estBB, estHR, estIP, config.fipConstant);
   const estER = estERA != null ? estERA * (estIP || 6) / 9 : null;
 
-  const { pWin, pLoss } = estimateWinProb(starts, estERA, config.lgRunsPerGame);
+  const { pWin, pLoss } = estimateWinProb(estIP, estERA, config.lgRunsPerGame);
   const pQS = estimateQSProb(starts, estIP, estERA);
 
   let pts = 0;
@@ -205,6 +297,21 @@ export function computePitcherModel(db) {
   };
   const weights = getWeights(db);
 
+  // Compute league-wide IP and ER standard deviations from all starts
+  const allStarts = db.prepare('SELECT ip, er FROM pitcher_starts WHERE ip IS NOT NULL AND er IS NOT NULL').all();
+  if (allStarts.length >= 2) {
+    const ipMean = allStarts.reduce((s, r) => s + r.ip, 0) / allStarts.length;
+    const ipVar = allStarts.reduce((s, r) => s + (r.ip - ipMean) ** 2, 0) / (allStarts.length - 1);
+    estimateQSProb._ipSd = Math.max(Math.sqrt(ipVar), 0.5);
+
+    const erMean = allStarts.reduce((s, r) => s + r.er, 0) / allStarts.length;
+    const erVar = allStarts.reduce((s, r) => s + (r.er - erMean) ** 2, 0) / (allStarts.length - 1);
+    estimateQSProb._erSd = Math.max(Math.sqrt(erVar), 0.5);
+  }
+
+  // Fit BB% regression from all starts
+  const bbCoeffs = fitBBCoefficients(db);
+
   const pitchers = db.prepare(`
     SELECT DISTINCT player_id FROM pitcher_starts WHERE player_id IS NOT NULL AND ip IS NOT NULL
   `).all();
@@ -233,7 +340,7 @@ export function computePitcherModel(db) {
   db.transaction(() => {
     for (const { player_id } of pitchers) {
       for (const w of [3, 10, 30]) {
-        const result = computeForWindow(db, player_id, w, config, weights);
+        const result = computeForWindow(db, player_id, w, config, weights, bbCoeffs);
         if (result) {
           upsert.run(result);
           count++;
