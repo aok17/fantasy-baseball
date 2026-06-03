@@ -11,6 +11,7 @@ async function json(url, opts) {
 
 export const api = {
   getRankings: () => json('/rankings'),
+  getPlanning: (scope) => json(`/planning${scope ? `?scope=${scope}` : ''}`),
   getDraftSessions: () => json('/draft/sessions'),
   createDraftSession: (name) => json('/draft/sessions', { method: 'POST', body: JSON.stringify({ name }) }),
   getDraftPicks: (sessionId) => json(`/draft/sessions/${sessionId}/picks`),

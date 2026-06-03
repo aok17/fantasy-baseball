@@ -5,6 +5,7 @@ import { fetchEspn } from '../scrapers/espn.js';
 import { fetchInjuries } from '../scrapers/injuries.js';
 import { fetchRosters } from '../scrapers/rosters.js';
 import { fetchPitcherStarts } from '../scrapers/pitcher-starts.js';
+import { runPlanning } from '../planning/compute.js';
 import { computePitcherModel } from '../scoring/pitcher-model.js';
 import { rescoreAll } from '../scoring/rescore.js';
 
@@ -13,14 +14,29 @@ function setLastRefreshed(db, source) {
     .run(`last_refreshed_${source}`, new Date().toISOString());
 }
 
+function setLastDuration(db, source, ms) {
+  db.prepare("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)")
+    .run(`last_duration_${source}`, String(ms));
+}
+
 export function createScrapeRouter(db) {
   const router = Router();
 
+  // Expose last durations so client can estimate progress
+  router.get('/durations', (req, res) => {
+    const rows = db.prepare("SELECT key, value FROM app_config WHERE key LIKE 'last_duration_%'").all();
+    const durations = {};
+    for (const r of rows) durations[r.key.replace('last_duration_', '')] = Number(r.value);
+    res.json(durations);
+  });
+
   router.post('/fangraphs', async (req, res) => {
+    const t0 = Date.now();
     try {
       const result = await fetchFanGraphs(db);
       rescoreAll(db);
       setLastRefreshed(db, 'fangraphs');
+      setLastDuration(db, 'fangraphs', Date.now() - t0);
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -28,9 +44,11 @@ export function createScrapeRouter(db) {
   });
 
   router.post('/fangraphs-actual', async (req, res) => {
+    const t0 = Date.now();
     try {
       const result = await fetchFanGraphsActual(db);
       setLastRefreshed(db, 'fangraphs_actual');
+      setLastDuration(db, 'fangraphs-actual', Date.now() - t0);
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -38,9 +56,11 @@ export function createScrapeRouter(db) {
   });
 
   router.post('/savant', async (req, res) => {
+    const t0 = Date.now();
     try {
       const result = await fetchSavant(db);
       setLastRefreshed(db, 'savant');
+      setLastDuration(db, 'savant', Date.now() - t0);
       res.json({ ok: true, ...result });
       setImmediate(() => {
         try { rescoreAll(db); } catch (e) { console.error('rescoreAll after Savant failed:', e); }
@@ -51,11 +71,11 @@ export function createScrapeRouter(db) {
   });
 
   router.post('/espn', async (req, res) => {
+    const t0 = Date.now();
     try {
       const result = await fetchEspn(db);
       setLastRefreshed(db, 'espn');
-      // Don't rescore inline — ESPN fetch uses too much memory on 256MB VM.
-      // Rescore will run when triggered separately.
+      setLastDuration(db, 'espn', Date.now() - t0);
       res.json({ ok: true, ...result, note: 'Rescore needed — trigger FanGraphs refresh or /rescore' });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -63,9 +83,11 @@ export function createScrapeRouter(db) {
   });
 
   router.post('/injuries', async (req, res) => {
+    const t0 = Date.now();
     try {
       const result = await fetchInjuries(db);
       setLastRefreshed(db, 'injuries');
+      setLastDuration(db, 'injuries', Date.now() - t0);
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -73,9 +95,11 @@ export function createScrapeRouter(db) {
   });
 
   router.post('/rosters', async (req, res) => {
+    const t0 = Date.now();
     try {
       const result = await fetchRosters(db);
       setLastRefreshed(db, 'rosters');
+      setLastDuration(db, 'rosters', Date.now() - t0);
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -83,15 +107,76 @@ export function createScrapeRouter(db) {
   });
 
   router.post('/pitcher-starts', async (req, res) => {
-    try {
-      const result = await fetchPitcherStarts(db);
-      setLastRefreshed(db, 'pitcher_starts');
-      res.json({ ok: true, ...result });
-      setImmediate(() => {
-        try { computePitcherModel(db); } catch (e) { console.error('Pitcher model failed:', e); }
+    const t0 = Date.now();
+    const wantsSSE = (req.headers.accept || '').includes('text/event-stream');
+    if (wantsSSE) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
       });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
+      const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const result = await fetchPitcherStarts(db, (step, total, message) => {
+          send({ type: 'progress', step, total, message });
+        });
+        setLastRefreshed(db, 'pitcher_starts');
+        setLastDuration(db, 'pitcher-starts', Date.now() - t0);
+        send({ type: 'done', result: { ok: true, ...result } });
+        res.end();
+        setImmediate(() => {
+          try { computePitcherModel(db); } catch (e) { console.error('Pitcher model failed:', e); }
+        });
+      } catch (e) {
+        send({ type: 'error', error: e.message });
+        res.end();
+      }
+    } else {
+      try {
+        const result = await fetchPitcherStarts(db);
+        setLastRefreshed(db, 'pitcher_starts');
+        setLastDuration(db, 'pitcher-starts', Date.now() - t0);
+        res.json({ ok: true, ...result });
+        setImmediate(() => {
+          try { computePitcherModel(db); } catch (e) { console.error('Pitcher model failed:', e); }
+        });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    }
+  });
+
+  router.post('/planning', async (req, res) => {
+    const t0 = Date.now();
+    const wantsSSE = (req.headers.accept || '').includes('text/event-stream');
+    if (wantsSSE) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const result = await runPlanning(db, (step, total, message) => {
+          send({ type: 'progress', step, total, message });
+        });
+        setLastRefreshed(db, 'planning');
+        setLastDuration(db, 'planning', Date.now() - t0);
+        send({ type: 'done', result: { ok: true, ...result } });
+        res.end();
+      } catch (e) {
+        send({ type: 'error', error: e.message });
+        res.end();
+      }
+    } else {
+      try {
+        const result = await runPlanning(db);
+        setLastRefreshed(db, 'planning');
+        setLastDuration(db, 'planning', Date.now() - t0);
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
     }
   });
 

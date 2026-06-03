@@ -209,6 +209,61 @@ CREATE TABLE IF NOT EXISTS pitcher_model (
 
 CREATE INDEX IF NOT EXISTS idx_pitcher_model_player_id ON pitcher_model(player_id);
 
+-- ============================================================================
+-- MULTI-WEEK PLANNING (playing-time volume projection)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS mlb_schedule (
+  game_pk INTEGER PRIMARY KEY,
+  game_date TEXT NOT NULL,          -- local YYYY-MM-DD
+  season INTEGER NOT NULL,
+  home_team_id INTEGER NOT NULL,
+  away_team_id INTEGER NOT NULL,
+  home_sp_mlbam TEXT,               -- probablePitcher id when known (past=actual, future=announced)
+  away_sp_mlbam TEXT,
+  status TEXT                       -- detailedState (Final, Scheduled, etc.)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sched_date ON mlb_schedule(game_date);
+CREATE INDEX IF NOT EXISTS idx_sched_home ON mlb_schedule(home_team_id);
+CREATE INDEX IF NOT EXISTS idx_sched_away ON mlb_schedule(away_team_id);
+
+CREATE TABLE IF NOT EXISTS batter_game_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
+  mlbam_id TEXT NOT NULL,
+  game_date TEXT NOT NULL,
+  season INTEGER NOT NULL,
+  opp_team_id INTEGER,
+  opp_sp_mlbam TEXT,
+  opp_sp_hand TEXT,                 -- L/R, denormalized at compute
+  started INTEGER NOT NULL,         -- 1 if in starting lineup
+  UNIQUE(mlbam_id, game_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bgl_player_id ON batter_game_logs(player_id);
+CREATE INDEX IF NOT EXISTS idx_bgl_mlbam ON batter_game_logs(mlbam_id);
+
+CREATE TABLE IF NOT EXISTS playing_time_projection (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
+  week_index INTEGER NOT NULL,      -- 0..N-1
+  week_start TEXT NOT NULL,
+  week_end TEXT NOT NULL,
+  player_type TEXT NOT NULL,        -- 'P' | 'B'
+  games_in_week INTEGER,            -- team games that week
+  exp_starts REAL,                  -- pitchers
+  two_start INTEGER,                -- pitchers: 1 if >=2 projected
+  exp_games REAL,                   -- hitters
+  start_rate REAL,                  -- hitters: overall (rest)
+  vs_lhp_rate REAL,
+  vs_rhp_rate REAL,
+  confidence TEXT,                  -- 'announced' | 'projected'
+  UNIQUE(player_id, week_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ptp_player_id ON playing_time_projection(player_id);
+
 CREATE TABLE IF NOT EXISTS draft_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,

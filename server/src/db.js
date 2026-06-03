@@ -57,6 +57,18 @@ export function createDb(dbPath) {
     }
   } catch (e) { /* table may already be migrated */ }
 
+  // Add espn_id columns for ID-based matching
+  try { db.exec('ALTER TABLE players ADD COLUMN espn_id INTEGER'); } catch (e) { /* exists */ }
+  try { db.exec('ALTER TABLE position_eligibility ADD COLUMN espn_id INTEGER'); } catch (e) { /* exists */ }
+
+  // Planning view: handedness + MLB team id on players
+  try { db.exec('ALTER TABLE players ADD COLUMN bat_hand TEXT'); } catch (e) { /* exists */ }
+  try { db.exec('ALTER TABLE players ADD COLUMN throw_hand TEXT'); } catch (e) { /* exists */ }
+  try { db.exec('ALTER TABLE players ADD COLUMN mlb_team_id INTEGER'); } catch (e) { /* exists */ }
+
+  // Switch projection system from steamer to Depth Charts
+  db.prepare("UPDATE app_config SET value = 'fangraphsdc' WHERE key = 'projection_system' AND value = 'steamer'").run();
+
   // Create player_id indexes (after migrations ensure columns exist)
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_pitchers_raw_player_id ON pitchers_raw(player_id)'); } catch (e) {}
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_batters_raw_player_id ON batters_raw(player_id)'); } catch (e) {}

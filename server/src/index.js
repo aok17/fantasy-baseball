@@ -9,6 +9,7 @@ import { createRankingsRouter } from './routes/rankings.js';
 import { createDraftRouter } from './routes/draft.js';
 import { createConfigRouter } from './routes/config.js';
 import { createScrapeRouter } from './routes/scrape.js';
+import { createPlanningRouter } from './routes/planning.js';
 
 const db = createDb();
 const app = express();
@@ -20,6 +21,7 @@ app.use('/api/rankings', createRankingsRouter(db));
 app.use('/api/draft', createDraftRouter(db));
 app.use('/api/config', createConfigRouter(db));
 app.use('/api/scrape', createScrapeRouter(db));
+app.use('/api/planning', createPlanningRouter(db));
 
 // Serve built client in production
 const clientDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'client', 'dist');

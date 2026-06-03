@@ -1,6 +1,7 @@
 import { Routes, Route, NavLink } from 'react-router-dom';
 import Rankings from './pages/Rankings';
 import Draft from './pages/Draft';
+import Planning from './pages/Planning';
 import Settings from './pages/Settings';
 import FreshnessBar from './components/FreshnessBar';
 
@@ -12,6 +13,7 @@ function Nav() {
     <nav className="flex items-center gap-1 border-b border-gray-200 px-6 bg-white shadow-sm">
       <NavLink to="/" end className={linkClass}>Rankings</NavLink>
       <NavLink to="/draft" className={linkClass}>Draft</NavLink>
+      <NavLink to="/planning" className={linkClass}>Planning</NavLink>
       <NavLink to="/settings" className={linkClass}>Settings</NavLink>
       <div className="ml-auto py-3">
         <FreshnessBar />
@@ -28,6 +30,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Rankings />} />
           <Route path="/draft" element={<Draft />} />
+          <Route path="/planning" element={<Planning />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
