@@ -259,6 +259,28 @@ describe('computeProjections (integration, seeded DB)', () => {
     expect(wk0.start_rate).toBeCloseTo(1, 5);
   });
 
+  it('falls back to last MLB club when handMap team is a minor-league id (rehab/optioned)', () => {
+    // The people API hydrate=currentTeam returns a minor-league affiliate id
+    // (e.g. 1960) for a player on a rehab assignment, which finds zero games in
+    // the MLB-only schedule. He should still map to his last MLB club (team 2)
+    // from the lineups and get logs + a non-empty projection.
+    const db2 = createDb(':memory:');
+    const s = seed(db2);
+    const handMap = buildHandMap();
+    handMap.set(BAT, { bat_hand: 'L', throw_hand: null, mlb_team_id: 1960 }); // minor-league affiliate
+    computeProjections(db2, { games: buildGames(), handMap, asOf: ASOF });
+
+    const logs = db2.prepare('SELECT started FROM batter_game_logs WHERE mlbam_id = ?').all(BAT);
+    expect(logs.length).toBe(4);
+    expect(logs.every(l => l.started === 1)).toBe(true);
+
+    const wk0 = db2.prepare(
+      "SELECT exp_games, games_in_week FROM playing_time_projection WHERE player_id = ? AND week_index = 0"
+    ).get(s.pidBat);
+    expect(wk0.games_in_week).toBe(5);
+    expect(wk0.exp_games).toBeCloseTo(5, 3);
+  });
+
   it('writes empty future weeks with zero/zeroish playing time', () => {
     // Weeks 1..3 have no scheduled games in this fixture.
     const wk1P = db.prepare(

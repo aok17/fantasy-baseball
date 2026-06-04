@@ -90,9 +90,23 @@ export function computeProjections(db, { games, handMap, ilIntervals = new Map()
   const teamCompletedGames = new Map(); // team_id -> [{game_pk, game_date, isHome, lineup:Set, opp_sp}]
   const push = (map, k, v) => { if (!map.has(k)) map.set(k, []); map.get(k).push(v); };
 
+  // The schedule only contains MLB clubs, so its team ids define the valid set.
+  // A player whose currentTeam (from the people API) is a minor-league affiliate
+  // (rehab/optioned) won't match here, triggering the lastMlbClub fallback below.
+  const validMlbTeamIds = new Set();
+  const lastMlbClub = new Map(); // mlbam -> { team_id, game_date } of most recent appearance
+  const noteAppearance = (mlbam, teamId, date) => {
+    const cur = lastMlbClub.get(mlbam);
+    if (!cur || date > cur.game_date) lastMlbClub.set(mlbam, { team_id: teamId, game_date: date });
+  };
+
   for (const g of games) {
+    if (g.home_team_id) validMlbTeamIds.add(g.home_team_id);
+    if (g.away_team_id) validMlbTeamIds.add(g.away_team_id);
     const isFinal = g.status === 'Final';
     if (isFinal) {
+      for (const m of g.home_lineup || []) noteAppearance(m, g.home_team_id, g.game_date);
+      for (const m of g.away_lineup || []) noteAppearance(m, g.away_team_id, g.game_date);
       push(teamPastStarts, g.home_team_id, { game_date: g.game_date, sp_mlbam: g.home_sp_mlbam });
       push(teamPastStarts, g.away_team_id, { game_date: g.game_date, sp_mlbam: g.away_sp_mlbam });
       push(teamCompletedGames, g.home_team_id, { game_date: g.game_date, lineup: new Set(g.home_lineup), opp_sp: g.away_sp_mlbam, opp_team_id: g.away_team_id });
@@ -105,7 +119,14 @@ export function computeProjections(db, { games, handMap, ilIntervals = new Map()
 
   // 4. Derive batter_game_logs from lineups (ranked batters only).
   const batters = ranked.filter(r => POS_BATTER.test(r.position || '') && !/\bSP\b|\bRP\b/.test(r.position || ''));
-  const teamOf = (mlbam) => handMap.get(mlbam)?.mlb_team_id ?? null;
+  // currentTeam from the people API returns a minor-league affiliate id when a
+  // player is on a rehab assignment or optioned, which finds zero games in the
+  // MLB-only schedule. Fall back to the player's last MLB club from the lineups.
+  const teamOf = (mlbam) => {
+    const t = handMap.get(mlbam)?.mlb_team_id ?? null;
+    if (t != null && validMlbTeamIds.has(t)) return t;
+    return lastMlbClub.get(mlbam)?.team_id ?? t;
+  };
   const insBGL = db.prepare(`
     INSERT INTO batter_game_logs (player_id, mlbam_id, game_date, season, opp_team_id, opp_sp_mlbam, opp_sp_hand, started)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
