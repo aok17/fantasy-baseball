@@ -51,52 +51,71 @@ export async function fetchEspn(db) {
   const year = db.prepare("SELECT value FROM app_config WHERE key='season_year'").get()?.value || '2026';
   const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/${year}/segments/0/leaguedefaults/3?view=kona_player_info`;
 
-  // Fetch in batches of 300 to stay under 256MB memory limit (~35MB heap per batch)
-  const BATCH_SIZE = 300;
-  const players = [];
-  for (let offset = 0; offset < 1500; offset += BATCH_SIZE) {
-    const batch = await fetchEspnBatch(url, offset, BATCH_SIZE);
-    players.push(...batch);
-    if (batch.length < BATCH_SIZE) break; // no more players
-  }
-
-  if (players.length === 0) {
-    console.warn('ESPN returned 0 players — keeping existing data');
-    return { players: 0, positions: 0, skipped: true };
-  }
-
   const replacements = loadReplacements(db);
   const accentMap = buildAccentMap(db);
   const source = `espn_${year}`;
-
-  const bestByName = {};
-  for (const p of players) {
-    const n = reconcileName(p.name, replacements);
-    const pts = p.projected_points || 0;
-    if (!bestByName[n] || pts > bestByName[n]) bestByName[n] = pts;
-  }
 
   const insertAdp = db.prepare(
     'INSERT INTO espn_rank (name, espn_id, adp_rank, projected_points) VALUES (?, ?, ?, ?)'
   );
   const insertPos = db.prepare(
-    'INSERT OR IGNORE INTO position_eligibility (name, source, position) VALUES (?, ?, ?)'
+    'INSERT OR IGNORE INTO position_eligibility (name, espn_id, source, position) VALUES (?, ?, ?, ?)'
   );
 
-  db.transaction(() => {
-    db.prepare('DELETE FROM espn_rank').run();
-    db.prepare('DELETE FROM position_eligibility WHERE source = ?').run(source);
+  // Clear tables before batch inserts
+  db.prepare('DELETE FROM espn_rank').run();
+  db.prepare('DELETE FROM position_eligibility WHERE source = ?').run(source);
 
-    for (const p of players) {
-      let name = reconcileName(p.name, replacements);
-      const pts = p.projected_points || 0;
-      if (accentMap[name] && pts >= bestByName[name]) name = accentMap[name];
-      insertAdp.run(name, p.espn_id, p.adp_rank, p.projected_points);
-      for (const pos of p.positions) {
-        insertPos.run(name, source, pos);
-      }
+  // First pass: fetch all batches to find bestByName for accent mapping.
+  // Only store the minimal data needed (name → pts) to keep memory low.
+  const BATCH_SIZE = 100;
+  // Track best ESPN rank per reconciled name for accent mapping
+  // (lower rank = better; use rank not projected_points which can be negative)
+  const bestRankByName = {};
+  let totalPlayers = 0;
+
+  for (let offset = 0; offset < 1500; offset += BATCH_SIZE) {
+    const batch = await fetchEspnBatch(url, offset, BATCH_SIZE);
+    for (const p of batch) {
+      const n = reconcileName(p.name, replacements);
+      const rank = p.adp_rank ?? 99999;
+      if (!bestRankByName[n] || rank < bestRankByName[n]) bestRankByName[n] = rank;
     }
-  })();
+    // Insert this batch immediately and discard
+    db.transaction(() => {
+      for (const p of batch) {
+        let name = reconcileName(p.name, replacements);
+        // Defer accent mapping to second pass
+        insertAdp.run(name, p.espn_id, p.adp_rank, p.projected_points);
+        for (const pos of p.positions) {
+          insertPos.run(name, p.espn_id, source, pos);
+        }
+      }
+    })();
+    totalPlayers += batch.length;
+    if (global.gc) global.gc();
+    if (batch.length < BATCH_SIZE) break;
+  }
 
-  return { players: players.length, positions: players.filter(p => p.positions.length > 0).length };
+  if (totalPlayers === 0) {
+    console.warn('ESPN returned 0 players — keeping existing data');
+    return { players: 0, positions: 0, skipped: true };
+  }
+
+  // Second pass (in-DB): apply accent mapping to the best-ranked player per name
+  for (const [stripped, accented] of Object.entries(accentMap)) {
+    const bestRank = bestRankByName[stripped];
+    if (bestRank == null) continue;
+    db.prepare('UPDATE espn_rank SET name = ? WHERE name = ? AND adp_rank <= ?')
+      .run(accented, stripped, bestRank);
+  }
+  // Sync position_eligibility names from espn_rank via espn_id
+  // (avoids renaming the wrong player when two share a name, e.g. two "Julio Rodriguez")
+  db.exec(`
+    UPDATE position_eligibility SET name = (
+      SELECT er.name FROM espn_rank er WHERE er.espn_id = position_eligibility.espn_id
+    ) WHERE source = '${source}' AND espn_id IS NOT NULL
+  `);
+
+  return { players: totalPlayers, positions: 0 };
 }

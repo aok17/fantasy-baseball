@@ -46,4 +46,9 @@ export function seedDefaults(db) {
   insertConfig.run('lg_hr_fb', '0.095');
   insertConfig.run('lg_runs_per_game', '4.5');
   insertConfig.run('fip_constant', '3.15');
+  // Planning view
+  insertConfig.run('planning_week_start', 'monday');
+  insertConfig.run('recency_half_life_days', '21');
+  insertConfig.run('rotation_size', '5');
+  insertConfig.run('planning_weeks', '4');
 }

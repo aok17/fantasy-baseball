@@ -43,16 +43,22 @@ function parseCalledStrikes(csvText) {
   return map;
 }
 
-async function fetchSavantGameLogs(season) {
+async function fetchSavantGameLogs(season, sinceDate) {
   const base = 'https://baseballsavant.mlb.com/statcast_search/csv';
-  const params = `?all=true&hfGT=R%7C&hfSea=${season}%7C&player_type=pitcher&group_by=name-date&min_pitches=50&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&chk_stats_pa=on&chk_stats_abs=on&chk_stats_bip=on&chk_stats_hits=on&chk_stats_hrs=on&chk_stats_so=on&chk_stats_k_percent=on&chk_stats_bb=on&chk_stats_bb_percent=on&chk_stats_whiffs=on&chk_stats_swings=on&chk_stats_ba=on&chk_stats_babip=on&chk_stats_woba=on&chk_stats_xwoba=on`;
+  let params = `?all=true&hfGT=R%7C&hfSea=${season}%7C&player_type=pitcher&group_by=name-date&min_pitches=40&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&chk_stats_pa=on&chk_stats_abs=on&chk_stats_bip=on&chk_stats_hits=on&chk_stats_hrs=on&chk_stats_so=on&chk_stats_k_percent=on&chk_stats_bb=on&chk_stats_bb_percent=on&chk_stats_whiffs=on&chk_stats_swings=on&chk_stats_ba=on&chk_stats_babip=on&chk_stats_woba=on&chk_stats_xwoba=on`;
+
+  // Only fetch games after sinceDate if we have prior data
+  if (sinceDate) {
+    params += `&game_date_gt=${sinceDate}`;
+    console.log(`Incremental Savant fetch: games after ${sinceDate}`);
+  }
 
   const mainRes = await fetch(`${base}${params}`);
   if (!mainRes.ok) throw new Error(`Savant game log fetch failed: ${mainRes.status}`);
   const mainCsv = await mainRes.text();
   const starts = parseSavantGameLog(mainCsv);
 
-  // Second fetch for called strikes
+  // Second fetch for called strikes (same date filter)
   const csRes = await fetch(`${base}${params}&hfPR=called_strike%7C`);
   if (!csRes.ok) throw new Error(`Savant called-strike fetch failed: ${csRes.status}`);
   const csCsv = await csRes.text();
@@ -94,13 +100,35 @@ function parseIP(ipStr) {
   return full + partial / 3;
 }
 
-export async function fetchPitcherStarts(db) {
+export async function fetchPitcherStarts(db, onProgress) {
+  const progress = onProgress || (() => {});
   const row = db.prepare("SELECT value FROM app_config WHERE key = 'season_year'").get();
   const season = Number(row?.value) || new Date().getFullYear();
 
-  // 1. Fetch Savant game logs
-  const savantStarts = await fetchSavantGameLogs(season);
-  console.log(`Savant game logs: ${savantStarts.length} starts`);
+  // Check for most recent start we already have — fetch from 3 days before
+  // to ensure we don't miss late-processed data. Duplicates handled by UPSERT.
+  const lastStart = db.prepare(
+    'SELECT MAX(game_date) as last_date FROM pitcher_starts WHERE season = ?'
+  ).get(season);
+  let sinceDate = null;
+  if (lastStart?.last_date) {
+    const d = new Date(lastStart.last_date);
+    d.setDate(d.getDate() - 3);
+    sinceDate = d.toISOString().slice(0, 10);
+  }
+
+  // 1. Fetch Savant game logs (incremental if we have prior data)
+  progress(0, 3, sinceDate ? `Fetching new starts since ${sinceDate}...` : 'Fetching Savant game logs...');
+  const savantStarts = await fetchSavantGameLogs(season, sinceDate);
+  progress(1, 3, `Savant: ${savantStarts.length} new starts`);
+  console.log(`Savant game logs: ${savantStarts.length} new starts${sinceDate ? ` (since ${sinceDate})` : ''}`);
+
+  // If no new starts, skip MLB API calls entirely
+  if (savantStarts.length === 0) {
+    progress(3, 3, 'No new starts found');
+    console.log('No new starts — skipping MLB API');
+    return { starts: 0, pitchers: 0, incremental: true };
+  }
 
   // 2. Get SP mlbam_ids from combined_rankings
   const sps = db.prepare(`
@@ -110,17 +138,38 @@ export async function fetchPitcherStarts(db) {
   `).all();
   const spIds = new Set(sps.map(r => r.mlbam_id));
 
-  // 3. Fetch MLB API game logs for each SP
+  // Fetch MLB API for pitchers with new Savant starts + any with missing IP data
+  const pitchersWithNewStarts = new Set(savantStarts.map(s => s.mlbam_id).filter(id => spIds.has(id)));
+  const pitchersMissingIP = db.prepare(
+    'SELECT DISTINCT mlbam_id FROM pitcher_starts WHERE ip IS NULL AND season = ?'
+  ).all(season).map(r => r.mlbam_id);
+  const fetchIds = new Set([...pitchersWithNewStarts, ...pitchersMissingIP]);
+  if (fetchIds.size === 0 && savantStarts.length > 0) {
+    // First run or no SP matches — fetch all
+    for (const id of spIds) fetchIds.add(id);
+  }
+
+  const total = 2 + fetchIds.size + 1;
+  progress(2, total, `Fetching MLB API for ${fetchIds.size} pitchers...`);
+
+  // 3. Fetch MLB API game logs only for pitchers with new data
   const mlbLogs = new Map();
   let mlbTotal = 0;
-  for (const mlbamId of spIds) {
+  let i = 0;
+  for (const mlbamId of fetchIds) {
     const logs = await fetchMlbGameLog(mlbamId, season);
     for (const g of logs) {
       mlbLogs.set(`${mlbamId}|${g.date}`, g);
       mlbTotal++;
     }
+    i++;
+    if (i % 10 === 0 || i === fetchIds.size) {
+      progress(2 + i, total, `MLB API: ${i}/${fetchIds.size} pitchers`);
+    }
   }
-  console.log(`MLB API game logs: ${mlbTotal} starts for ${spIds.size} pitchers`);
+  console.log(`MLB API game logs: ${mlbTotal} starts for ${fetchIds.size} pitchers`);
+
+  progress(total - 1, total, 'Writing to database...');
 
   // 4. Join and upsert into pitcher_starts
   const findPlayer = db.prepare('SELECT id FROM players WHERE mlbam_id = ?');

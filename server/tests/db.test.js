@@ -93,6 +93,6 @@ describe('seed defaults', () => {
     const rl = db.prepare("SELECT value FROM app_config WHERE key='replacement_level'").get();
     expect(rl.value).toBe('237');
     const ps = db.prepare("SELECT value FROM app_config WHERE key='projection_system'").get();
-    expect(ps.value).toBe('steamer');
+    expect(ps.value).toBe('fangraphsdc');
   });
 });

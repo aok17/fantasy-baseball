@@ -22,4 +22,4 @@ RUN mkdir -p /data
 ENV DATABASE_PATH=/data/fantasy-baseball.db
 
 EXPOSE 3001
-CMD ["node", "server/src/index.js"]
+CMD ["node", "--expose-gc", "server/src/index.js"]
