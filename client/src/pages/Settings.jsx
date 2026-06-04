@@ -68,8 +68,12 @@ export default function Settings() {
                 api.updateAppConfig('projection_system', val);
               }}
               className="border rounded px-2 py-1 ml-1">
-              <option value="steamer">Steamer</option>
-              <option value="zips">ZiPS</option>
+              <option value="fangraphsdc">DepthCharts (auto-ROS)</option>
+              <option value="steamer">Steamer (auto-ROS)</option>
+              <option value="zips">ZiPS (auto-ROS)</option>
+              <option value="atc">ATC (auto-ROS)</option>
+              <option value="thebat">THE BAT (auto-ROS)</option>
+              <option value="thebatx">THE BAT X (auto-ROS)</option>
             </select>
           </label>
         </div>

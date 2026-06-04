@@ -230,6 +230,7 @@ export const ALL_COLUMNS = [
   { accessorKey: 'm3_era', header: 'ERA', size: 50, cell: num2, group: 'model_3', filterFn: columnFilterFn },
   { accessorKey: 'm3_ip', header: 'IP', size: 44, cell: num1, group: 'model_3', filterFn: columnFilterFn },
   { accessorKey: 'm3_pqs', header: 'QS%', size: 48, cell: ({ getValue }) => { const v = getValue(); return v != null ? (v * 100).toFixed(0) + '%' : ''; }, group: 'model_3', filterFn: columnFilterFn },
+  { accessorKey: 'm3_pw', header: 'W%', size: 44, cell: ({ getValue }) => { const v = getValue(); return v != null ? (v * 100).toFixed(0) + '%' : ''; }, group: 'model_3', filterFn: columnFilterFn },
   { accessorKey: 'm3_n', header: 'N', size: 32, cell: raw, group: 'model_3', filterFn: columnFilterFn },
   // Model (10-start rolling)
   { accessorKey: 'm10_pts', header: 'Pts', size: 52, cell: num1, group: 'model_10', filterFn: columnFilterFn },
@@ -238,6 +239,7 @@ export const ALL_COLUMNS = [
   { accessorKey: 'm10_era', header: 'ERA', size: 50, cell: num2, group: 'model_10', filterFn: columnFilterFn },
   { accessorKey: 'm10_ip', header: 'IP', size: 44, cell: num1, group: 'model_10', filterFn: columnFilterFn },
   { accessorKey: 'm10_pqs', header: 'QS%', size: 48, cell: ({ getValue }) => { const v = getValue(); return v != null ? (v * 100).toFixed(0) + '%' : ''; }, group: 'model_10', filterFn: columnFilterFn },
+  { accessorKey: 'm10_pw', header: 'W%', size: 44, cell: ({ getValue }) => { const v = getValue(); return v != null ? (v * 100).toFixed(0) + '%' : ''; }, group: 'model_10', filterFn: columnFilterFn },
   { accessorKey: 'm10_n', header: 'N', size: 32, cell: raw, group: 'model_10', filterFn: columnFilterFn },
   // Model (30-start rolling)
   { accessorKey: 'm30_pts', header: 'Pts', size: 52, cell: num1, group: 'model_30', filterFn: columnFilterFn },
@@ -246,6 +248,7 @@ export const ALL_COLUMNS = [
   { accessorKey: 'm30_era', header: 'ERA', size: 50, cell: num2, group: 'model_30', filterFn: columnFilterFn },
   { accessorKey: 'm30_ip', header: 'IP', size: 44, cell: num1, group: 'model_30', filterFn: columnFilterFn },
   { accessorKey: 'm30_pqs', header: 'QS%', size: 48, cell: ({ getValue }) => { const v = getValue(); return v != null ? (v * 100).toFixed(0) + '%' : ''; }, group: 'model_30', filterFn: columnFilterFn },
+  { accessorKey: 'm30_pw', header: 'W%', size: 44, cell: ({ getValue }) => { const v = getValue(); return v != null ? (v * 100).toFixed(0) + '%' : ''; }, group: 'model_30', filterFn: columnFilterFn },
   { accessorKey: 'm30_n', header: 'N', size: 32, cell: raw, group: 'model_30', filterFn: columnFilterFn },
 ];
 
@@ -376,7 +379,17 @@ export default function PlayerTable({ data, globalFilter, positionFilter, roster
   }, [visible]);
 
   const columns = useMemo(() => {
-    return ALL_COLUMNS.filter(c => c.group === 'core' || visible.has(c.accessorKey));
+    return ALL_COLUMNS
+      .filter(c => c.group === 'core' || visible.has(c.accessorKey))
+      .map(c => ({
+        ...c,
+        id: c.accessorKey,
+        accessorFn: row => {
+          const v = row[c.accessorKey];
+          return v === null ? undefined : v;
+        },
+        sortUndefined: -1,
+      }));
   }, [visible]);
 
   const filteredData = useMemo(() => {

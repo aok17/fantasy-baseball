@@ -6,10 +6,19 @@ import SearchBar from '../components/SearchBar';
 
 const RANK_OPTIONS = [100, 250, 500, 1000, null];
 
+const ROSTER_OPTIONS = [
+  { label: 'All', value: null },
+  { label: 'Mine + FA', value: 'mine+fa' },
+  { label: 'Mine', value: 'mine' },
+  { label: 'Available', value: 'available' },
+  { label: 'Taken', value: 'taken' },
+];
+
 export default function Rankings() {
   const [players, setPlayers] = useState([]);
   const [search, setSearch] = useState('');
   const [posFilter, setPosFilter] = useState(null);
+  const [rosterFilter, setRosterFilter] = useState(null);
   const [rankLimit, setRankLimit] = useState(1000);
   const [loading, setLoading] = useState(true);
 
@@ -33,6 +42,16 @@ export default function Rankings() {
         <div className="h-5 w-px bg-gray-300" />
         <SearchBar value={search} onChange={setSearch} />
         <PositionFilter value={posFilter} onChange={setPosFilter} />
+        <div className="flex items-center gap-1">
+          {ROSTER_OPTIONS.map(opt => (
+            <button
+              key={opt.value ?? 'all'}
+              onClick={() => setRosterFilter(opt.value)}
+              className={`px-2 py-0.5 text-xs rounded ${rosterFilter === opt.value ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-1 ml-2">
           <span className="text-xs text-gray-500">Top:</span>
           {RANK_OPTIONS.map(opt => (
@@ -46,7 +65,7 @@ export default function Rankings() {
         </div>
         <span className="text-sm text-gray-400 ml-auto">{displayCount} players</span>
       </div>
-      <PlayerTable data={players} globalFilter={search} positionFilter={posFilter} rankLimit={rankLimit} onNoteChange={handleNoteChange} />
+      <PlayerTable data={players} globalFilter={search} positionFilter={posFilter} rosterFilter={rosterFilter} rankLimit={rankLimit} onNoteChange={handleNoteChange} />
     </div>
   );
 }
