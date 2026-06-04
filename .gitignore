@@ -7,3 +7,5 @@ dist/
 .superpowers/
 tmp_*
 .gstack/
+.claude/settings.local.json
+.playwright-mcp/
