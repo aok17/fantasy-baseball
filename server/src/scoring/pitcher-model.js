@@ -3,14 +3,18 @@
 // =============================================================================
 //
 // FITTED FROM DATA (recomputed each run from pitcher_starts):
+//   - K% coefficients (a, b, c in xK% = a * SwStr% + b * CStr% + c) — OLS on all starts
 //   - BB% coefficients (a, b in xBB% = a * ball_pct + b) — OLS on all starts
 //   - League-wide IP std dev — std dev of IP across all starts
 //   - League-wide ER std dev — std dev of ER across all starts
 //
+//   The K% model was previously hardcoded from FanGraphs multivariate research
+//   (xK% = 1.2*SwStr% + 0.6*CStr% - 4.0, Alex Chamberlain). Those coefficients
+//   under-predicted K% on this data source across the board — worst for high-whiff
+//   arms — so K% is now fit per run like BB%. The published coefficients remain the
+//   fallback when there are too few starts to fit.
+//
 // FROM PUBLISHED RESEARCH:
-//   - K% model: xK% = 1.2 * SwStr% + 0.6 * CStr% - 4.0
-//     Source: FanGraphs multivariate K% research (R²≈0.82-0.86)
-//     Published by Alex Chamberlain, FanGraphs community research
 //   - BABIP regression k=3700
 //     Source: Tom Tango, "Inside The Book" / tangotiger.com
 //   - HR/FB regression k=170
@@ -71,9 +75,9 @@ function rollingSum(starts, field) {
   return starts.reduce((sum, s) => sum + (s[field] || 0), 0);
 }
 
-// Sub-model 1: Strikeout rate (aggressive)
-// xK% = 1.2 * SwStr% + 0.6 * CStr% - 4.0
-function estimateKPct(starts) {
+// Sub-model 1: Strikeout rate
+// xK% = a * SwStr% + b * CStr% + c, coefficients fit from all starts via OLS
+function estimateKPct(starts, kCoeffs) {
   const totalPitches = rollingSum(starts, 'total_pitches');
   const whiffs = rollingSum(starts, 'whiffs');
   const calledStrikes = rollingSum(starts, 'called_strikes');
@@ -81,8 +85,66 @@ function estimateKPct(starts) {
 
   const swstrPct = (whiffs / totalPitches) * 100;
   const cstrPct = (calledStrikes / totalPitches) * 100;
-  const xk = 1.2 * swstrPct + 0.6 * cstrPct - 4.0;
+  const xk = kCoeffs.a * swstrPct + kCoeffs.b * cstrPct + kCoeffs.c;
   return Math.max(0, Math.min(xk / 100, 0.60));
+}
+
+// Fit OLS: k_pct = a * swstr_pct + b * cstr_pct + c from all starts.
+// Mirrors fitBBCoefficients but with two predictors. The previously hardcoded
+// "published research" coefficients (1.2, 0.6, -4.0) under-predicted K% league-wide
+// on this data source — worst for high-whiff arms (Skenes came out ~9 K% too low) —
+// because the fitted slope/intercept differ from the source population. Fitting per
+// run removes that bias. Falls back to the published coefficients on too few starts.
+export function fitKCoefficients(db) {
+  const rows = db.prepare(`
+    SELECT total_pitches, whiffs, called_strikes, so, pa
+    FROM pitcher_starts
+    WHERE total_pitches > 0 AND pa > 0 AND whiffs IS NOT NULL AND called_strikes IS NOT NULL
+  `).all();
+
+  const fallback = { a: 1.2, b: 0.6, c: -4.0 };
+  if (rows.length < 10) return fallback;
+
+  // Normal equations for y = a*x1 + b*x2 + c over features [x1=SwStr%, x2=CStr%, 1].
+  let s11 = 0, s12 = 0, s1 = 0, s22 = 0, s2 = 0, n = 0, s1y = 0, s2y = 0, sy = 0;
+  for (const r of rows) {
+    const x1 = (r.whiffs / r.total_pitches) * 100;
+    const x2 = (r.called_strikes / r.total_pitches) * 100;
+    const y = (r.so / r.pa) * 100;
+    s11 += x1 * x1; s12 += x1 * x2; s1 += x1;
+    s22 += x2 * x2; s2 += x2;
+    s1y += x1 * y; s2y += x2 * y; sy += y;
+    n++;
+  }
+
+  const sol = solve3(
+    [[s11, s12, s1], [s12, s22, s2], [s1, s2, n]],
+    [s1y, s2y, sy]
+  );
+  if (!sol) return fallback;
+
+  const [a, b, c] = sol;
+  console.log(`K% model fit: xK% = ${a.toFixed(4)} * SwStr% + ${b.toFixed(4)} * CStr% + ${c.toFixed(4)} (n=${n})`);
+  return { a, b, c };
+}
+
+// Gaussian elimination with partial pivoting for a 3x3 system. Returns null if singular.
+function solve3(M, rhs) {
+  const A = M.map((row, i) => [...row, rhs[i]]);
+  for (let col = 0; col < 3; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 3; r++) {
+      if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    }
+    if (Math.abs(A[piv][col]) < 1e-12) return null;
+    [A[col], A[piv]] = [A[piv], A[col]];
+    for (let r = 0; r < 3; r++) {
+      if (r === col) continue;
+      const f = A[r][col] / A[col][col];
+      for (let k = col; k < 4; k++) A[r][k] -= f * A[col][k];
+    }
+  }
+  return [A[0][3] / A[0][0], A[1][3] / A[1][1], A[2][3] / A[2][2]];
 }
 
 // Sub-model 2: Walk rate (aggressive)
@@ -234,11 +296,11 @@ function estimateQSProb(starts, estIP, estERA) {
   return pIP6 * pER3;
 }
 
-function computeForWindow(db, playerId, windowSize, config, weights, bbCoeffs) {
+function computeForWindow(db, playerId, windowSize, config, weights, bbCoeffs, kCoeffs) {
   const starts = getRecentStarts(db, playerId, windowSize);
   if (starts.length === 0) return null;
 
-  const xkPct = estimateKPct(starts);
+  const xkPct = estimateKPct(starts, kCoeffs);
   const xbbPct = estimateBBPct(starts, bbCoeffs);
   const regBabip = regressedBABIP(starts, config.lgBabip);
   const regHr9 = regressedHR9(starts, config.lgHrFb);
@@ -309,8 +371,9 @@ export function computePitcherModel(db) {
     estimateQSProb._erSd = Math.max(Math.sqrt(erVar), 0.5);
   }
 
-  // Fit BB% regression from all starts
+  // Fit BB% and K% regressions from all starts
   const bbCoeffs = fitBBCoefficients(db);
+  const kCoeffs = fitKCoefficients(db);
 
   const pitchers = db.prepare(`
     SELECT DISTINCT player_id FROM pitcher_starts WHERE player_id IS NOT NULL AND ip IS NOT NULL
@@ -340,7 +403,7 @@ export function computePitcherModel(db) {
   db.transaction(() => {
     for (const { player_id } of pitchers) {
       for (const w of [3, 10, 30]) {
-        const result = computeForWindow(db, player_id, w, config, weights, bbCoeffs);
+        const result = computeForWindow(db, player_id, w, config, weights, bbCoeffs, kCoeffs);
         if (result) {
           upsert.run(result);
           count++;
