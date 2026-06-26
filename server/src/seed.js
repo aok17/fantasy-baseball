@@ -35,7 +35,9 @@ export function seedDefaults(db) {
   const insertConfig = db.prepare(
     'INSERT OR IGNORE INTO app_config (key, value) VALUES (?, ?)'
   );
-  insertConfig.run('replacement_level', '237');
+  // VOR roster construction (overwritten from live ESPN mSettings on roster scrape).
+  insertConfig.run('league_size', '10');
+  insertConfig.run('roster_slots', JSON.stringify({ C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 5, DH: 1, SP: 8, RP: 1 }));
   insertConfig.run('projection_system', 'fangraphsdc');
   insertConfig.run('season_year', '2026');
   insertConfig.run('espn_league_id', '133164');

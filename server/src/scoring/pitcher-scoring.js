@@ -1,6 +1,9 @@
 import { safeDivide } from './utils.js';
 
-export function computePitcherScores(pitchers, weights, replacementLevel) {
+// Per-pitcher raw components. Replacement-agnostic: VOR is applied separately
+// (applyPitcherVOR) once the whole pool exists, since "replacement level" is a
+// population concept, not a per-player one.
+export function computePitcherScores(pitchers, weights) {
   return pitchers.map(p => {
     const raw_score =
       (p.IP || 0) * weights.IP +
@@ -20,26 +23,35 @@ export function computePitcherScores(pitchers, weights, replacementLevel) {
     else if (p.GS === 0) display_position = 'RP';
     else display_position = 'SP, RP';
 
-    const adjustment = scoring_position === 'CLOSER'
-      ? -10
-      : -Math.min(raw_score * 3 / 7, replacementLevel * 10 / 7 * 3 / 7) + 165;
-
-    const adj_score = raw_score + adjustment;
-
+    // Split raw value into start-derived and relief-derived points (prorated by the
+    // share of appearances that were relief). Each is valued against its own role's
+    // replacement level so closers/swingmen aren't measured against starter depth.
     const relief_pts = safeDivide(raw_score * (p.G - p.GS), p.IP);
     const starting_pts = raw_score - relief_pts;
-
-    const sp_value = -Math.min(starting_pts * 3 / 7, replacementLevel * 10 / 7 * 3 / 7) + 215 + starting_pts;
-    const rp_value = relief_pts + 71;
-    const adj_2020_value = Math.max(sp_value, rp_value);
-
     const pts_per_appearance = safeDivide(raw_score, p.G);
 
     return {
       name: p.name, team: p.team,
       scoring_position, display_position,
-      raw_score, adjustment, adj_score,
-      starting_pts, relief_pts, adj_2020_value, pts_per_appearance,
+      raw_score, starting_pts, relief_pts, pts_per_appearance,
+    };
+  });
+}
+
+// Value Over Replacement, role-split: a pitcher is worth the better of his value as a
+// starter (above SP replacement) or as a reliever (above RP replacement). repl =
+// { sp, rp } from computeReplacement. `adj_2020_value` is the board sort key; the
+// stored `adjustment`/`adj_score` columns are kept as derived views of it (no magic).
+export function applyPitcherVOR(scored, repl) {
+  return scored.map(p => {
+    const sp_vor = p.starting_pts - (repl.sp || 0);
+    const rp_vor = p.relief_pts - (repl.rp || 0);
+    const adj_2020_value = Math.max(sp_vor, rp_vor);
+    return {
+      ...p,
+      sp_vor, rp_vor, adj_2020_value,
+      adj_score: adj_2020_value,
+      adjustment: adj_2020_value - p.raw_score,
     };
   });
 }

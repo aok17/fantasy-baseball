@@ -36,7 +36,7 @@ export function createConfigRouter(db) {
     const { key, value } = req.body;
     db.prepare('INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)').run(key, value);
     // Auto-rescore when scoring-relevant config changes
-    if (key === 'replacement_level' || key === 'projection_system') {
+    if (key === 'league_size' || key === 'roster_slots' || key === 'projection_system') {
       rescoreAll(db);
     }
     res.json({ ok: true });

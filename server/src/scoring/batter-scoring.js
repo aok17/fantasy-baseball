@@ -23,11 +23,11 @@ export function resolvePosition(positionRows) {
   return 'DH';
 }
 
-function primaryPosition(positionString) {
-  return positionString.split(',')[0].trim();
-}
+import { batterReplacement } from './replacement.js';
 
-export function computeBatterScores(batters, weights, posAdj) {
+// Per-batter raw components. Replacement-agnostic; VOR applied separately once the
+// full pool exists (applyBatterVOR), since positional replacement is a population concept.
+export function computeBatterScores(batters, weights) {
   return batters.map(b => {
     const raw_score =
       (b.H || 0) * weights.H +
@@ -41,14 +41,19 @@ export function computeBatterScores(batters, weights, posAdj) {
       (b.SB || 0) * weights.SB;
 
     const position = b.position || 'DH';
-    const primary = primaryPosition(position);
-    const adjustment = posAdj[primary] ?? posAdj.DH ?? 10;
-    const adj_score = raw_score + adjustment;
     const pts_per_game = safeDivide(raw_score, b.G);
 
-    return {
-      name: b.name, team: b.team, position,
-      raw_score, adjustment, adj_score, pts_per_game,
-    };
+    return { name: b.name, team: b.team, position, raw_score, pts_per_game };
+  });
+}
+
+// Value Over Replacement: a batter's value is how far his raw score sits above the
+// replacement-level player at his scarcest eligible position. The position-scarcity
+// premium (catcher > OF) emerges from the data instead of a hand-tuned ladder.
+export function applyBatterVOR(scored, byPos) {
+  return scored.map(b => {
+    const repl = batterReplacement(b.position, byPos);
+    const adj_score = b.raw_score - repl;
+    return { ...b, adjustment: -repl, adj_score };
   });
 }

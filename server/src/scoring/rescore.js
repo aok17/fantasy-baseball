@@ -1,6 +1,7 @@
-import { computePitcherScores } from './pitcher-scoring.js';
+import { computePitcherScores, applyPitcherVOR } from './pitcher-scoring.js';
 import { computePitcherModel } from './pitcher-model.js';
-import { computeBatterScores, resolvePosition } from './batter-scoring.js';
+import { computeBatterScores, applyBatterVOR, resolvePosition } from './batter-scoring.js';
+import { computeReplacement, DEFAULT_SLOTS } from './replacement.js';
 import { buildCombinedRankings } from './combined.js';
 
 function getWeights(db, category) {
@@ -8,13 +9,6 @@ function getWeights(db, category) {
   const weights = {};
   for (const r of rows) weights[r.stat] = r.weight;
   return weights;
-}
-
-function getPosAdjustments(db) {
-  const rows = db.prepare('SELECT position, adjustment FROM position_adjustments').all();
-  const adj = {};
-  for (const r of rows) adj[r.position] = r.adjustment;
-  return adj;
 }
 
 function getConfig(db, key) {
@@ -120,11 +114,13 @@ export function rescoreAll(db) {
   db.transaction(() => {
     const pitcherWeights = getWeights(db, 'pitcher');
     const batterWeights = getWeights(db, 'batter');
-    const posAdj = getPosAdjustments(db);
-    const replacementLevel = Number(getConfig(db, 'replacement_level')) || 237;
+    const leagueSize = Number(getConfig(db, 'league_size')) || 10;
+    let slots;
+    try { slots = JSON.parse(getConfig(db, 'roster_slots') || ''); } catch { slots = null; }
+    if (!slots) slots = DEFAULT_SLOTS;
 
     const rawPitchers = db.prepare('SELECT * FROM pitchers_raw').all();
-    const pitcherScores = computePitcherScores(rawPitchers, pitcherWeights, replacementLevel);
+    let pitcherScores = computePitcherScores(rawPitchers, pitcherWeights);
 
     const rawBatters = db.prepare('SELECT * FROM batters_raw WHERE PA >= 10').all();
 
@@ -146,7 +142,19 @@ export function rescoreAll(db) {
       const pid = idMap[`${b.name}|${b.team}`];
       return { ...b, position: resolvePosition(positionsMap[pid] || positionsMap[key] || positionsMap[b.name] || []) };
     });
-    const batterScores = computeBatterScores(battersWithPos, batterWeights, posAdj);
+    let batterScores = computeBatterScores(battersWithPos, batterWeights);
+
+    // Derive replacement levels from the full scored pools + real roster construction,
+    // then apply Value Over Replacement. No hand-tuned constants anywhere downstream.
+    const repl = computeReplacement(pitcherScores, batterScores, { leagueSize, slots });
+    pitcherScores = applyPitcherVOR(pitcherScores, repl);
+    batterScores = applyBatterVOR(batterScores, repl.byPos);
+
+    const setCfg = db.prepare('INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)');
+    setCfg.run('last_replacement_sp', String(repl.sp));
+    setCfg.run('last_replacement_rp', String(repl.rp));
+    setCfg.run('last_replacement_by_pos', JSON.stringify(repl.byPos));
+    console.log(`VOR replacement (league=${leagueSize}): SP=${repl.sp.toFixed(1)} RP=${repl.rp.toFixed(1)} byPos=${JSON.stringify(repl.byPos)}`);
 
     db.prepare('DELETE FROM pitcher_scores').run();
     const insertPitcher = db.prepare(`

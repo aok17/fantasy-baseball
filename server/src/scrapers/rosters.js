@@ -1,4 +1,5 @@
 import { reconcileName, loadReplacements } from './names.js';
+import { slotsFromEspn } from '../scoring/replacement.js';
 
 export async function fetchRosters(db) {
   const year = db.prepare("SELECT value FROM app_config WHERE key='season_year'").get()?.value || '2026';
@@ -7,10 +8,17 @@ export async function fetchRosters(db) {
 
   if (!leagueId) throw new Error('espn_league_id not configured');
 
-  const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/${year}/segments/0/leagues/${leagueId}?view=mRoster&view=mTeam`;
+  const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/${year}/segments/0/leagues/${leagueId}?view=mRoster&view=mTeam&view=mSettings`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`ESPN roster fetch failed: ${res.status}`);
   const data = await res.json();
+
+  // Capture real roster construction for VOR replacement depth (league size + starting
+  // slots per position). These drive the scoring baselines, so persist them to config.
+  const setCfg = db.prepare('INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)');
+  if (data.settings?.size) setCfg.run('league_size', String(data.settings.size));
+  const slotCounts = data.settings?.rosterSettings?.lineupSlotCounts;
+  if (slotCounts) setCfg.run('roster_slots', JSON.stringify(slotsFromEspn(slotCounts)));
 
   // Build member ID → first name map
   const members = {};

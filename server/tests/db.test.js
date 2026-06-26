@@ -90,8 +90,10 @@ describe('seed defaults', () => {
 
   it('seeds app config defaults', () => {
     seedDefaults(db);
-    const rl = db.prepare("SELECT value FROM app_config WHERE key='replacement_level'").get();
-    expect(rl.value).toBe('237');
+    const ls = db.prepare("SELECT value FROM app_config WHERE key='league_size'").get();
+    expect(ls.value).toBe('10');
+    const rs = db.prepare("SELECT value FROM app_config WHERE key='roster_slots'").get();
+    expect(JSON.parse(rs.value).OF).toBe(5);
     const ps = db.prepare("SELECT value FROM app_config WHERE key='projection_system'").get();
     expect(ps.value).toBe('fangraphsdc');
   });
