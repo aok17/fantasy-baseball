@@ -61,13 +61,20 @@ export function computeReplacement(pitchers, batters, { leagueSize, slots }) {
   const sp = valueAtDepth(spVals, sz * (slots.SP || 0));
   const rp = valueAtDepth(rpVals, sz * (slots.RP || 0));
 
+  // Depth of a generic everyday bat = every batter starting slot in the lineup.
+  // This is the bar for the DH/UTIL slot, which any batter can fill.
+  const totalBatterSlots = BATTER_POSITIONS.reduce((s, p) => s + (slots[p] || 0), 0);
+
   const byPos = {};
   for (const pos of BATTER_POSITIONS) {
-    const vals = batters
-      .filter((b) => eligible(b.position).includes(pos))
-      .map((b) => b.raw_score)
-      .sort((a, b) => b - a);
-    byPos[pos] = valueAtDepth(vals, sz * (slots[pos] || 0));
+    // DH/UTIL is fillable by ANY batter, so its pool is the whole batter set and its
+    // depth is all batter slots -> a high bar, small premium (least scarce slot). A
+    // real position (C, OF, ...) draws only position-eligible players at its own depth.
+    const isUtil = pos === 'DH';
+    const pool = isUtil ? batters : batters.filter((b) => eligible(b.position).includes(pos));
+    const vals = pool.map((b) => b.raw_score).sort((a, b) => b - a);
+    const rank = isUtil ? sz * totalBatterSlots : sz * (slots[pos] || 0);
+    byPos[pos] = valueAtDepth(vals, rank);
   }
 
   return { sp, rp, byPos };

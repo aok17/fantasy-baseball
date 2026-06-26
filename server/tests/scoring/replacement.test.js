@@ -45,6 +45,13 @@ describe('computeReplacement', () => {
     expect(r.byPos.OF).toBe(150);
   });
 
+  it('DH/UTIL replacement draws from the whole batter pool at total-batter-slot depth', () => {
+    // slots C1 + OF1 + DH1 => totalBatterSlots 3; leagueSize 1 => rank 3 over ALL batters.
+    // all raw sorted: [200,150,100,90] -> rank 3 -> 100 (a high bar, not the thin DH pool)
+    const r = computeReplacement(pitchers, batters, { leagueSize: 1, slots: { SP: 1, RP: 1, C: 1, OF: 1, DH: 1 } });
+    expect(r.byPos.DH).toBe(100);
+  });
+
   it('thin pool (fewer players than rank) returns the last available value', () => {
     // Only 1 catcher, rank 2 -> falls back to the single available value
     const r = computeReplacement(pitchers, batters, { leagueSize: 2, slots: { SP: 1, RP: 1, OF: 1, C: 1 } });
