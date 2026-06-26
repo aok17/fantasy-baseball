@@ -37,7 +37,7 @@ export function seedDefaults(db) {
   );
   // VOR roster construction (overwritten from live ESPN mSettings on roster scrape).
   insertConfig.run('league_size', '10');
-  insertConfig.run('roster_slots', JSON.stringify({ C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 5, DH: 1, SP: 8, RP: 1 }));
+  insertConfig.run('roster_slots', JSON.stringify({ C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 5, MI: 1, CI: 1, UTIL: 1, SP: 8, RP: 1 }));
   insertConfig.run('projection_system', 'fangraphsdc');
   insertConfig.run('season_year', '2026');
   insertConfig.run('espn_league_id', '133164');
