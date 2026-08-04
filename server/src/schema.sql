@@ -263,6 +263,30 @@ CREATE TABLE IF NOT EXISTS playing_time_projection (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ptp_player_id ON playing_time_projection(player_id);
+-- Week headers are read straight off the projection table (DISTINCT week_index).
+CREATE INDEX IF NOT EXISTS idx_ptp_week_index ON playing_time_projection(week_index);
+
+-- One row per projected pitcher start. playing_time_projection is one row per
+-- (player_id, week_index) and can only carry a count, so the per-start detail —
+-- WHO the opponent is and whether the pitcher's club is home — lives here.
+-- Rewritten (delete + rebuild) in the same transaction as playing_time_projection.
+CREATE TABLE IF NOT EXISTS projected_start (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER REFERENCES players(id),
+  mlbam_id TEXT NOT NULL,
+  week_index INTEGER NOT NULL,
+  game_pk INTEGER NOT NULL,
+  game_date TEXT NOT NULL,
+  team_id INTEGER,                  -- the pitcher's own club
+  opp_team_id INTEGER,
+  is_home INTEGER,                  -- 1 if the pitcher's club is the home side
+  confidence TEXT,                  -- 'announced' | 'projected'
+  UNIQUE(mlbam_id, game_pk)
+);
+
+-- The API reads these grouped by (player_id, week_index) in one shot.
+CREATE INDEX IF NOT EXISTS idx_projected_start_player_week ON projected_start(player_id, week_index);
+CREATE INDEX IF NOT EXISTS idx_projected_start_date ON projected_start(game_date);
 
 CREATE TABLE IF NOT EXISTS draft_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

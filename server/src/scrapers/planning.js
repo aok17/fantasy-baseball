@@ -41,8 +41,11 @@ export async function fetchSchedule(season, { months = [3, 4, 5, 6, 7, 8, 9, 10]
   return games;
 }
 
-// Batch-fetch handedness + current team for a list of mlbam ids.
-// Returns Map<mlbam, { bat_hand, throw_hand, mlb_team_id }>.
+// Batch-fetch handedness + identity for a list of mlbam ids.
+// Returns Map<mlbam, { bat_hand, throw_hand, mlb_team_id, full_name, position, team_abbrev }>.
+// full_name/position/team_abbrev let the planning compute create a players row
+// for a starter who exists in the schedule but in no ranking file (streamers,
+// call-ups, back-end starters) — see planning/player-link.js.
 export async function fetchHandedness(mlbamIds, { batchSize = 300 } = {}) {
   const ids = [...new Set(mlbamIds.filter(Boolean).map(String))];
   const map = new Map();
@@ -57,6 +60,9 @@ export async function fetchHandedness(mlbamIds, { batchSize = 300 } = {}) {
         bat_hand: p.batSide?.code || null,
         throw_hand: p.pitchHand?.code || null,
         mlb_team_id: p.currentTeam?.id ?? null,
+        full_name: p.fullName || null,
+        position: p.primaryPosition?.abbreviation || null,
+        team_abbrev: p.currentTeam?.abbreviation || null,
       });
     }
   }

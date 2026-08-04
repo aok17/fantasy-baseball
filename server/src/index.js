@@ -10,8 +10,12 @@ import { createDraftRouter } from './routes/draft.js';
 import { createConfigRouter } from './routes/config.js';
 import { createScrapeRouter } from './routes/scrape.js';
 import { createPlanningRouter } from './routes/planning.js';
+import { ensureTeamOffenseTable } from './scrapers/team-offense.js';
 
 const db = createDb();
+// mlb_team_offense lives outside schema.sql; create it at boot so readers can
+// query it before the first planning refresh.
+ensureTeamOffenseTable(db);
 const app = express();
 
 app.use(cors());

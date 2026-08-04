@@ -6,6 +6,7 @@ import { fetchInjuries } from '../scrapers/injuries.js';
 import { fetchRosters } from '../scrapers/rosters.js';
 import { fetchPitcherStarts } from '../scrapers/pitcher-starts.js';
 import { runPlanning } from '../planning/compute.js';
+import { refreshTeamOffense } from '../scrapers/team-offense.js';
 import { computePitcherModel } from '../scoring/pitcher-model.js';
 import { rescoreAll } from '../scoring/rescore.js';
 
@@ -17,6 +18,21 @@ function setLastRefreshed(db, source) {
 function setLastDuration(db, source, ms) {
   db.prepare("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)")
     .run(`last_duration_${source}`, String(ms));
+}
+
+function seasonYear(db) {
+  const r = db.prepare('SELECT value FROM app_config WHERE key = ?').get('season_year');
+  return Number(r?.value || new Date().getFullYear());
+}
+
+// Two cheap StatsAPI calls; never fail the planning refresh over it.
+async function refreshTeamOffenseSafe(db) {
+  try {
+    return await refreshTeamOffense(db, seasonYear(db));
+  } catch (e) {
+    console.error('Team offense refresh failed:', e.message);
+    return { error: e.message };
+  }
 }
 
 export function createScrapeRouter(db) {
@@ -160,9 +176,11 @@ export function createScrapeRouter(db) {
         const result = await runPlanning(db, (step, total, message) => {
           send({ type: 'progress', step, total, message });
         });
+        send({ type: 'progress', step: 5, total: 6, message: 'Fetching team offense...' });
+        const teamOffense = await refreshTeamOffenseSafe(db);
         setLastRefreshed(db, 'planning');
         setLastDuration(db, 'planning', Date.now() - t0);
-        send({ type: 'done', result: { ok: true, ...result } });
+        send({ type: 'done', result: { ok: true, ...result, team_offense: teamOffense } });
         res.end();
       } catch (e) {
         send({ type: 'error', error: e.message });
@@ -171,9 +189,10 @@ export function createScrapeRouter(db) {
     } else {
       try {
         const result = await runPlanning(db);
+        const teamOffense = await refreshTeamOffenseSafe(db);
         setLastRefreshed(db, 'planning');
         setLastDuration(db, 'planning', Date.now() - t0);
-        res.json({ ok: true, ...result });
+        res.json({ ok: true, ...result, team_offense: teamOffense });
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
