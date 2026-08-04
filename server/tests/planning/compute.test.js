@@ -1,6 +1,7 @@
+import { inferRotation, projectTeamRotation } from '../../src/planning/rotation.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createDb } from '../../src/db.js';
-import { computeProjections } from '../../src/planning/compute.js';
+import { computeProjections, isPlayed, isCalledOff } from '../../src/planning/compute.js';
 import { buildIlIntervals } from '../../src/planning/il.js';
 
 // Synthetic scenario, all in one team1-vs-team2 series.
@@ -492,5 +493,64 @@ describe('pitcher universe beyond combined_rankings', () => {
       'SELECT player_type FROM playing_time_projection WHERE player_id = ? AND week_index = 0'
     ).get(s.pidBat);
     expect(row.player_type).toBe('B');
+  });
+});
+
+describe('game status handling', () => {
+  it('counts rain-shortened games as played', () => {
+    // "Completed Early" is neither Final nor in the future window, so testing
+    // status === 'Final' dropped the game entirely — and its starting pitcher
+    // with it, collapsing that club's rotation by one man.
+    expect(isPlayed('Completed Early')).toBe(true);
+    expect(isPlayed('Completed Early: Rain')).toBe(true);
+    expect(isPlayed('Game Over')).toBe(true);
+    expect(isPlayed('Final')).toBe(true);
+  });
+
+  it('does not count games that have not happened', () => {
+    for (const s of ['Scheduled', 'Pre-Game', 'Warmup', 'Postponed', '']) {
+      expect(isPlayed(s)).toBe(false);
+    }
+  });
+
+  it('flags called-off games so no starter is projected against them', () => {
+    expect(isCalledOff('Postponed')).toBe(true);
+    expect(isCalledOff('Cancelled')).toBe(true);
+    expect(isCalledOff('Canceled')).toBe(true);
+    expect(isCalledOff('Suspended')).toBe(true);
+    expect(isCalledOff('Scheduled')).toBe(false);
+    expect(isCalledOff('Final')).toBe(false);
+  });
+
+  it('keeps a rotation intact when one past game was shortened', () => {
+    // Regression for the real Philadelphia case: Wheeler's Aug 2 start came back
+    // as "Completed Early", which dropped him from the inferred rotation and
+    // moved Aaron Nola's two-start week a week later than every other source.
+    const past = [
+      { game_date: '2026-07-28', sp_mlbam: 'nola', status: 'Final' },
+      { game_date: '2026-07-29', sp_mlbam: 'luzardo', status: 'Final' },
+      { game_date: '2026-07-31', sp_mlbam: 'painter', status: 'Final' },
+      { game_date: '2026-08-01', sp_mlbam: 'sanchez', status: 'Final' },
+      { game_date: '2026-08-02', sp_mlbam: 'wheeler', status: 'Completed Early' },
+      { game_date: '2026-08-03', sp_mlbam: 'nola', status: 'Final' },
+    ].filter(g => isPlayed(g.status));
+
+    const { members, size } = inferRotation(past, {});
+    expect(size).toBe(5);
+    expect(members.map(m => m.mlbam)).toContain('wheeler');
+
+    // Aug 4-6 are announced, which re-syncs the queue exactly as it does live.
+    const future = [
+      { game_pk: 1, game_date: '2026-08-04', announced_sp: 'luzardo' },
+      { game_pk: 2, game_date: '2026-08-05', announced_sp: 'painter' },
+      { game_pk: 3, game_date: '2026-08-06', announced_sp: 'sanchez' },
+      ...['2026-08-07', '2026-08-08', '2026-08-09', '2026-08-10', '2026-08-11']
+        .map((d, i) => ({ game_pk: 10 + i, game_date: d, announced_sp: null })),
+    ];
+    const nolaStarts = projectTeamRotation(past, future, {})
+      .filter(a => a.sp_mlbam === 'nola').map(a => a.game_date);
+    // Wheeler is the most-due arm, so he takes Aug 7 and Nola goes Aug 8 —
+    // giving Nola two starts that week alongside his completed Aug 3.
+    expect(nolaStarts).toEqual(['2026-08-08']);
   });
 });

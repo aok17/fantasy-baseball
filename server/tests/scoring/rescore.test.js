@@ -156,3 +156,70 @@ describe('name canonicalization across projection feeds', () => {
     expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name LIKE 'Luis Garc%'").get().n).toBe(2);
   });
 });
+
+describe('duplicate collapsing', () => {
+  // The rankings query LEFT JOINs pitchers_raw / batters_raw / *_actual on
+  // player_id, none of which is unique — two rows sharing an id fan the result
+  // out and the player appears twice at identical rank and score.
+  it('collapses raw rows that share a player_id', () => {
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Dup Arm', 'NYY');
+    const stmt = db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Dup Arm','NYY',30,30,180,12,8,18,0,0,160,70,15,180,45)`);
+    stmt.run(); stmt.run();
+    expect(db.prepare('SELECT COUNT(*) n FROM pitchers_raw').get().n).toBe(2);
+
+    rescoreAll(db);
+
+    const pid = db.prepare("SELECT id FROM players WHERE name = 'Dup Arm'").get().id;
+    expect(db.prepare('SELECT COUNT(*) n FROM pitchers_raw WHERE player_id = ?').get(pid).n).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) n FROM combined_rankings WHERE name = 'Dup Arm'").get().n).toBe(1);
+  });
+
+  it('collapses actual rows that share a player_id', () => {
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Dup Bat', 'LAD');
+    const pid = db.prepare("SELECT id FROM players WHERE name = 'Dup Bat'").get().id;
+    const stmt = db.prepare(`INSERT INTO batters_actual (player_id, name, team, G, PA, AB, H, HR, R, RBI, BB, SO, SB, CS)
+      VALUES (?, 'Dup Bat','LAD',100,400,360,95,15,50,45,30,80,10,2)`);
+    stmt.run(pid); stmt.run(pid);
+    db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS)
+      VALUES ('Dup Bat','LAD',150,600,550,160,30,5,35,95,100,60,130,5,15,3)`).run();
+
+    rescoreAll(db);
+
+    expect(db.prepare('SELECT COUNT(*) n FROM batters_actual WHERE player_id = ?').get(pid).n).toBe(1);
+  });
+
+  it('collapses identical unlinked rows too', () => {
+    const db = freshDb();
+    const stmt = db.prepare(`INSERT INTO pitchers_actual (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Unlinked','FA',1,1,5,0,0,0,0,0,5,2,1,4,2)`);
+    stmt.run(); stmt.run();
+    rescoreAll(db);
+    expect(db.prepare("SELECT COUNT(*) n FROM pitchers_actual WHERE name = 'Unlinked'").get().n).toBe(1);
+  });
+
+  it('keeps two genuinely different players', () => {
+    const db = freshDb();
+    const stmt = db.prepare(`INSERT INTO pitchers_actual (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES (?, ?, 1,1,5,0,0,0,0,0,5,2,1,4,2)`);
+    stmt.run('Arm One', 'SEA'); stmt.run('Arm Two', 'SEA');
+    rescoreAll(db);
+    expect(db.prepare('SELECT COUNT(*) n FROM pitchers_actual').get().n).toBe(2);
+  });
+
+  it('adopts the club on file when a feed lists an existing player as a free agent', () => {
+    // SQLite treats NULLs as distinct in UNIQUE(name, team), so a teamless row
+    // can't collapse onto the real one — it becomes a second player.
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Free Agent Guy', 'SEA');
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Free Agent Guy', NULL, 30,30,180,12,8,18,0,0,160,70,15,180,45)`).run();
+
+    rescoreAll(db);
+
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name = 'Free Agent Guy'").get().n).toBe(1);
+    expect(db.prepare("SELECT team FROM players WHERE name = 'Free Agent Guy'").get().team).toBe('SEA');
+  });
+});

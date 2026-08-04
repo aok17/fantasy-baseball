@@ -16,19 +16,13 @@
 //      K/9, BB/9 and FIP are all derivable from counting stats and are computed
 //      here; the rest are written as 0 (display-only columns in the UI).
 
+import { toFgAbbrev } from './team-abbrev.js';
+
 const HITTER_URL = 'https://razzball.com/steamer-hitter-projections/';
 const PITCHER_URL = 'https://razzball.com/steamer-pitcher-projections/';
 
-// Razzball abbreviation -> the FanGraphs-style abbreviation already in players.team.
-const TEAM_MAP = {
-  KC: 'KCR', SD: 'SDP', SF: 'SFG', TB: 'TBR', WSH: 'WSN',
-};
-
-export function normalizeTeam(t) {
-  const s = String(t ?? '').trim().toUpperCase();
-  if (!s || s === 'FA') return null; // free agent — no club
-  return TEAM_MAP[s] || s;
-}
+// Shared with the StatsAPI actuals scraper — see team-abbrev.js for why.
+export const normalizeTeam = toFgAbbrev;
 
 function decodeEntities(s) {
   return String(s ?? '')

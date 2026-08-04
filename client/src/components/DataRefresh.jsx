@@ -3,7 +3,7 @@ import { api } from '../api';
 
 const SOURCES = [
   { key: 'razzball', label: 'Steamer Projections' },
-  { key: 'fangraphs-actual', label: 'FanGraphs Actual' },
+  { key: 'mlb-actual', label: 'Season Actuals' },
   { key: 'savant', label: 'Baseball Savant' },
   { key: 'espn', label: 'ESPN ADP' },
   { key: 'injuries', label: 'Injury Report' },

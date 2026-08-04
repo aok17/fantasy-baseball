@@ -60,12 +60,13 @@ function canonicalizeNames(db, ...rowSets) {
   if (!existing.length) return 0;
 
   const byNameTeam = new Map(); // "normname|team" -> canonical spelling
-  const byName = new Map();     // "normname" -> canonical spelling, or null if ambiguous
+  const byName = new Map();     // "normname" -> { name, team }, or null if ambiguous
   for (const p of existing) {
     const k = normalizeName(p.name);
     if (!k) continue;
     byNameTeam.set(`${k}|${p.team}`, p.name);
-    byName.set(k, byName.has(k) && byName.get(k) !== p.name ? null : p.name);
+    const prev = byName.get(k);
+    byName.set(k, byName.has(k) && prev?.name !== p.name ? null : { name: p.name, team: p.team });
   }
 
   let renamed = 0;
@@ -74,8 +75,14 @@ function canonicalizeNames(db, ...rowSets) {
       if (!r?.name) continue;
       const k = normalizeName(r.name);
       if (!k) continue;
-      const canon = byNameTeam.get(`${k}|${r.team}`) ?? byName.get(k);
+      const sole = byName.get(k) || null;
+      const canon = byNameTeam.get(`${k}|${r.team}`) ?? sole?.name;
       if (canon && canon !== r.name) { r.name = canon; renamed++; }
+      // A feed that lists someone as a free agent (Razzball's "FA" -> null club)
+      // would otherwise insert a second, teamless row for a player already on
+      // file: SQLite treats NULLs as distinct in UNIQUE(name, team), so the
+      // upsert can't collapse them. Adopt the club already on record instead.
+      if (r.team == null && sole?.team != null) r.team = sole.team;
     }
   }
   return renamed;
@@ -143,6 +150,22 @@ function upsertPlayers(db, pitcherScores, batterScores) {
     ) WHERE player_id IS NULL;
   `);
 
+  // The rankings query LEFT JOINs pitchers_raw / batters_raw / pitchers_actual /
+  // batters_actual on player_id, and none of those columns is unique. Two rows
+  // sharing a player_id therefore fan the result out and the same player appears
+  // twice in the rankings — 45 duplicate rows in production, e.g. Andrew Vaughn
+  // and Randy Vásquez listed twice at identical rank and score. Collapse to one
+  // row per player per table. Idempotent, so it also cleans data already on disk.
+  for (const table of ['pitchers_raw', 'batters_raw', 'pitchers_actual', 'batters_actual']) {
+    try {
+      db.prepare(`
+        DELETE FROM ${table} WHERE player_id IS NOT NULL AND id NOT IN (
+          SELECT MIN(id) FROM ${table} WHERE player_id IS NOT NULL GROUP BY player_id
+        )
+      `).run();
+    } catch (e) { /* table may not exist on an old DB */ }
+  }
+
   // Copy espn_id from espn_rank to players for ID-based matching
   // Always re-derive (not WHERE NULL) in case ESPN data changed
   db.exec(`
@@ -172,6 +195,17 @@ export function rescoreAll(db) {
     let slots;
     try { slots = JSON.parse(getConfig(db, 'roster_slots') || ''); } catch { slots = null; }
     if (!slots) slots = DEFAULT_SLOTS;
+
+    // Collapse duplicate rows before anything reads them. Doing this only after
+    // player_id is assigned would be too late: the score arrays are built from
+    // these tables, so a duplicate row would still reach combined_rankings even
+    // once the table itself was cleaned. GROUP BY treats NULL teams as equal
+    // here, unlike the UNIQUE(name, team) constraint.
+    for (const t of ['pitchers_raw', 'batters_raw', 'pitchers_actual', 'batters_actual']) {
+      try {
+        db.prepare(`DELETE FROM ${t} WHERE id NOT IN (SELECT MIN(id) FROM ${t} GROUP BY name, team)`).run();
+      } catch (e) { /* table may not exist on an old DB */ }
+    }
 
     const rawPitchers = db.prepare('SELECT * FROM pitchers_raw').all();
     let pitcherScores = computePitcherScores(rawPitchers, pitcherWeights);

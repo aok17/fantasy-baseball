@@ -11,6 +11,24 @@ import { weekBoundaries, bucketGamesByWeek } from './weeks.js';
 
 const POS_BATTER = /\b(C|1B|2B|3B|SS|OF|LF|CF|RF|DH|UTIL)\b/;
 
+// A game that actually happened, whatever StatsAPI calls it. This used to test
+// `status === 'Final'`, which silently dropped rain-shortened games: they are
+// neither Final (so not counted as past) nor in the future window (their date
+// has passed), so the game vanished entirely — taking its starting pitcher with
+// it. One such game collapsed Philadelphia to a phantom 4-man rotation, shifting
+// every arm up a slot and moving Aaron Nola's two-start week a week late.
+// Detail suffixes exist too ("Completed Early: Rain"), hence the prefix match.
+export function isPlayed(status) {
+  return /^(Final|Game Over|Completed Early)/i.test(String(status ?? ''));
+}
+
+// A game that will not be played as scheduled. Previously any non-Final game in
+// the window was treated as playable, so a postponement still had a starter
+// projected against it.
+export function isCalledOff(status) {
+  return /^(Postponed|Cancell?ed|Suspended)/i.test(String(status ?? ''));
+}
+
 function cfg(db, key, fallback) {
   const r = db.prepare('SELECT value FROM app_config WHERE key = ?').get(key);
   return r ? r.value : fallback;
@@ -119,15 +137,14 @@ export function computeProjections(db, { games, handMap, ilIntervals = new Map()
     // order), so note them separately or a schedule-only pitcher has no club.
     if (g.home_sp_mlbam) noteAppearance(g.home_sp_mlbam, g.home_team_id, g.game_date);
     if (g.away_sp_mlbam) noteAppearance(g.away_sp_mlbam, g.away_team_id, g.game_date);
-    const isFinal = g.status === 'Final';
-    if (isFinal) {
+    if (isPlayed(g.status)) {
       for (const m of g.home_lineup || []) noteAppearance(m, g.home_team_id, g.game_date);
       for (const m of g.away_lineup || []) noteAppearance(m, g.away_team_id, g.game_date);
       push(teamPastStarts, g.home_team_id, { game_date: g.game_date, sp_mlbam: g.home_sp_mlbam });
       push(teamPastStarts, g.away_team_id, { game_date: g.game_date, sp_mlbam: g.away_sp_mlbam });
       push(teamCompletedGames, g.home_team_id, { game_date: g.game_date, lineup: new Set(g.home_lineup), opp_sp: g.away_sp_mlbam, opp_team_id: g.away_team_id });
       push(teamCompletedGames, g.away_team_id, { game_date: g.game_date, lineup: new Set(g.away_lineup), opp_sp: g.home_sp_mlbam, opp_team_id: g.home_team_id });
-    } else if (g.game_date >= asOf && g.game_date <= windowEnd) {
+    } else if (!isCalledOff(g.status) && g.game_date >= asOf && g.game_date <= windowEnd) {
       // is_home is stamped here, from the schedule row itself, so a projected
       // start never has to guess which side of the matchup its club was on.
       push(teamFutureGames, g.home_team_id, { game_pk: g.game_pk, game_date: g.game_date, announced_sp: g.home_sp_mlbam, opp_team_id: g.away_team_id, is_home: 1 });

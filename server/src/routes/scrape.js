@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { fetchFanGraphs, fetchFanGraphsActual } from '../scrapers/fangraphs.js';
+import { fetchFanGraphs } from '../scrapers/fangraphs.js';
 import { fetchRazzball } from '../scrapers/razzball.js';
+import { fetchMlbActual } from '../scrapers/mlb-actual.js';
 import { fetchSavant } from '../scrapers/savant.js';
 import { fetchEspn } from '../scrapers/espn.js';
 import { fetchInjuries } from '../scrapers/injuries.js';
@@ -75,12 +76,14 @@ export function createScrapeRouter(db) {
     }
   });
 
-  router.post('/fangraphs-actual', async (req, res) => {
+  // Season actuals from MLB StatsAPI. Replaces /fangraphs-actual, whose leaders
+  // endpoint 403s behind the same Cloudflare challenge as the projections.
+  router.post('/mlb-actual', async (req, res) => {
     const t0 = Date.now();
     try {
-      const result = await fetchFanGraphsActual(db);
-      setLastRefreshed(db, 'fangraphs_actual');
-      setLastDuration(db, 'fangraphs-actual', Date.now() - t0);
+      const result = await fetchMlbActual(db);
+      setLastRefreshed(db, 'mlb_actual');
+      setLastDuration(db, 'mlb-actual', Date.now() - t0);
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -233,9 +236,9 @@ export function createScrapeRouter(db) {
       setLastRefreshed(db, 'razzball');
     } catch (e) { results.razzball = { error: e.message }; }
     try {
-      results.fangraphs_actual = await fetchFanGraphsActual(db);
-      setLastRefreshed(db, 'fangraphs_actual');
-    } catch (e) { results.fangraphs_actual = { error: e.message }; }
+      results.mlb_actual = await fetchMlbActual(db);
+      setLastRefreshed(db, 'mlb_actual');
+    } catch (e) { results.mlb_actual = { error: e.message }; }
     try {
       results.savant = await fetchSavant(db);
       setLastRefreshed(db, 'savant');
