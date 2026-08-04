@@ -166,6 +166,19 @@ function upsertPlayers(db, pitcherScores, batterScores) {
     } catch (e) { /* table may not exist on an old DB */ }
   }
 
+  // injuries is UNIQUE(name, team), so a traded player keeps a stale row under
+  // his old club and both resolve to the same player_id — which fanned the
+  // rankings query out (Andrew Vaughn, CHW -> MIL, listed twice). Keep the
+  // newest row per player; savant_expected is handled in the query instead,
+  // since its two rows per player are legitimate (pitcher and batter profiles).
+  try {
+    db.prepare(`
+      DELETE FROM injuries WHERE player_id IS NOT NULL AND id NOT IN (
+        SELECT MAX(id) FROM injuries WHERE player_id IS NOT NULL GROUP BY player_id
+      )
+    `).run();
+  } catch (e) { /* table may not exist on an old DB */ }
+
   // Copy espn_id from espn_rank to players for ID-based matching
   // Always re-derive (not WHERE NULL) in case ESPN data changed
   db.exec(`

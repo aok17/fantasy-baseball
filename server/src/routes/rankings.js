@@ -61,7 +61,13 @@ export function createRankingsRouter(db) {
       LEFT JOIN injuries inj ON inj.player_id = cr.player_id
       LEFT JOIN player_notes pn ON pn.player_id = cr.player_id
       LEFT JOIN rosters r ON r.espn_player_id = p.espn_id
+      -- savant_expected is UNIQUE(mlbam_id, player_type), so a player can hold a
+      -- pitcher row AND a batter row. Joining on player_id alone matched both and
+      -- listed him twice. Pick the profile matching this ranking row, which also
+      -- gives a two-way player the right numbers on each of his two rows.
       LEFT JOIN savant_expected se ON se.player_id = cr.player_id
+        AND se.player_type = CASE
+          WHEN cr.position LIKE '%SP%' OR cr.position LIKE '%RP%' THEN 'P' ELSE 'B' END
       LEFT JOIN pitcher_model pm3 ON pm3.player_id = cr.player_id AND pm3.window = 3
       LEFT JOIN pitcher_model pm10 ON pm10.player_id = cr.player_id AND pm10.window = 10
       LEFT JOIN pitcher_model pm30 ON pm30.player_id = cr.player_id AND pm30.window = 30
