@@ -3,6 +3,7 @@ import { computePitcherModel } from './pitcher-model.js';
 import { computeBatterScores, applyBatterVOR, resolvePosition } from './batter-scoring.js';
 import { computeReplacement, DEFAULT_SLOTS } from './replacement.js';
 import { buildCombinedRankings } from './combined.js';
+import { normalizeName } from '../planning/player-link.js';
 
 function getWeights(db, category) {
   const rows = db.prepare('SELECT stat, weight FROM scoring_config WHERE category = ?').all(category);
@@ -45,7 +46,46 @@ function getEspnRank(db) {
   return rank;
 }
 
+// Projection feeds don't agree on spelling: Razzball publishes accent-stripped
+// names ("Cristopher Sanchez", "Carlos Rodon") where the FanGraphs data already
+// in players uses the accented form ("Cristopher Sánchez", "Carlos Rodón").
+// Everything below keys players by exact name, so left alone that would insert a
+// SECOND row for the same man — splitting his ESPN roster link, position
+// eligibility, injury status and playing-time projection across two records.
+// Rewrite incoming names onto the spelling already on file before anything is
+// keyed by name. Ambiguous names (two players sharing one normalized form on
+// different clubs) are left alone rather than risk merging two people.
+function canonicalizeNames(db, ...rowSets) {
+  const existing = db.prepare('SELECT name, team FROM players').all();
+  if (!existing.length) return 0;
+
+  const byNameTeam = new Map(); // "normname|team" -> canonical spelling
+  const byName = new Map();     // "normname" -> canonical spelling, or null if ambiguous
+  for (const p of existing) {
+    const k = normalizeName(p.name);
+    if (!k) continue;
+    byNameTeam.set(`${k}|${p.team}`, p.name);
+    byName.set(k, byName.has(k) && byName.get(k) !== p.name ? null : p.name);
+  }
+
+  let renamed = 0;
+  for (const rows of rowSets) {
+    for (const r of rows) {
+      if (!r?.name) continue;
+      const k = normalizeName(r.name);
+      if (!k) continue;
+      const canon = byNameTeam.get(`${k}|${r.team}`) ?? byName.get(k);
+      if (canon && canon !== r.name) { r.name = canon; renamed++; }
+    }
+  }
+  return renamed;
+}
+
 function upsertPlayers(db, pitcherScores, batterScores) {
+  // Must run before any name-keyed insert or lookup below.
+  const renamed = canonicalizeNames(db, pitcherScores, batterScores);
+  if (renamed) console.log(`Canonicalized ${renamed} feed names onto existing players rows`);
+
   const upsert = db.prepare(`
     INSERT INTO players (name, team) VALUES (?, ?)
     ON CONFLICT(name, team) DO UPDATE SET team = excluded.team

@@ -93,3 +93,66 @@ describe('rescoreAll edge cases', () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+function freshDb() {
+  const db = new Database(':memory:');
+  db.exec(readFileSync(join(__dirname, '..', '..', 'src', 'schema.sql'), 'utf8'));
+  seedDefaults(db);
+  return db;
+}
+
+describe('name canonicalization across projection feeds', () => {
+  // Razzball publishes accent-stripped names where the FanGraphs data already in
+  // players uses the accented spelling. Without canonicalization the exact-name
+  // upsert creates a second row for the same player, splitting his roster link,
+  // positions, injuries and planning projection.
+  function seed() {
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Cristopher Sánchez', 'PHI');
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Carlos Rodón', 'NYY');
+    return db;
+  }
+
+  it('reuses the existing accented row instead of inserting a stripped duplicate', () => {
+    const db = seed();
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Cristopher Sanchez','PHI',30,30,180,12,8,18,0,0,160,70,15,180,45)`).run();
+    rescoreAll(db);
+
+    const rows = db.prepare("SELECT name FROM players WHERE team = 'PHI'").all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('Cristopher Sánchez');
+  });
+
+  it('links the scored row to the existing player id', () => {
+    const db = seed();
+    const existing = db.prepare("SELECT id FROM players WHERE name = 'Carlos Rodón'").get().id;
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Carlos Rodon','NYY',30,30,175,13,7,17,0,0,150,68,20,190,60)`).run();
+    rescoreAll(db);
+
+    const scored = db.prepare("SELECT player_id, name FROM pitcher_scores WHERE name LIKE 'Carlos Rod%'").get();
+    expect(scored.player_id).toBe(existing);
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE team = 'NYY'").get().n).toBe(1);
+  });
+
+  it('leaves a genuinely new player alone', () => {
+    const db = seed();
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Brand New Arm','SEA',20,20,120,8,6,11,0,0,100,45,10,110,30)`).run();
+    rescoreAll(db);
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name = 'Brand New Arm'").get().n).toBe(1);
+  });
+
+  it('does not merge two different players who share a normalized name', () => {
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Luis Garcia', 'HOU');
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('Luis García', 'WSN');
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Luis Garcia','HOU',30,30,180,12,8,18,0,0,160,70,15,180,45)`).run();
+    rescoreAll(db);
+    // Ambiguous by name alone, so the team-qualified match must win and neither
+    // existing row may be collapsed into the other.
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name LIKE 'Luis Garc%'").get().n).toBe(2);
+  });
+});
