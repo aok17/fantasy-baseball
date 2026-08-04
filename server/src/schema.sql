@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS pitchers_raw (
   H INTEGER, ER INTEGER, HR INTEGER, SO INTEGER, BB INTEGER,
   WHIP REAL, K9 REAL, BB9 REAL, ERA REAL, FIP REAL,
   WAR REAL, RA9WAR REAL,
-  fg_id TEXT
+  fg_id TEXT,
+  mlbam_id TEXT                     -- Razzball publishes MLBAM ids; FanGraphs does not
 );
 
 CREATE TABLE IF NOT EXISTS batters_raw (
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS batters_raw (
   AVG REAL, OBP REAL, SLG REAL, OPS REAL,
   wOBA REAL, wRC INTEGER,
   BsR REAL, Fld REAL, Off REAL, Def REAL, WAR REAL,
-  fg_id TEXT
+  fg_id TEXT,
+  mlbam_id TEXT                     -- Razzball publishes MLBAM ids; FanGraphs does not
 );
 
 CREATE TABLE IF NOT EXISTS pitchers_actual (

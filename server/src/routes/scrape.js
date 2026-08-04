@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { fetchFanGraphs, fetchFanGraphsActual } from '../scrapers/fangraphs.js';
+import { fetchRazzball } from '../scrapers/razzball.js';
 import { fetchSavant } from '../scrapers/savant.js';
 import { fetchEspn } from '../scrapers/espn.js';
 import { fetchInjuries } from '../scrapers/injuries.js';
@@ -53,6 +54,21 @@ export function createScrapeRouter(db) {
       rescoreAll(db);
       setLastRefreshed(db, 'fangraphs');
       setLastDuration(db, 'fangraphs', Date.now() - t0);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Razzball's published Steamer projections — the automatic replacement for
+  // /fangraphs, which now 403s behind FanGraphs' Cloudflare bot challenge.
+  router.post('/razzball', async (req, res) => {
+    const t0 = Date.now();
+    try {
+      const result = await fetchRazzball(db);
+      rescoreAll(db);
+      setLastRefreshed(db, 'razzball');
+      setLastDuration(db, 'razzball', Date.now() - t0);
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -210,10 +226,12 @@ export function createScrapeRouter(db) {
 
   router.post('/all', async (req, res) => {
     const results = {};
+    // Projections come from Razzball now — fetchFanGraphs 403s behind
+    // Cloudflare and FanGraphs does not support programmatic access.
     try {
-      results.fangraphs = await fetchFanGraphs(db);
-      setLastRefreshed(db, 'fangraphs');
-    } catch (e) { results.fangraphs = { error: e.message }; }
+      results.razzball = await fetchRazzball(db);
+      setLastRefreshed(db, 'razzball');
+    } catch (e) { results.razzball = { error: e.message }; }
     try {
       results.fangraphs_actual = await fetchFanGraphsActual(db);
       setLastRefreshed(db, 'fangraphs_actual');

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../api';
 
 const SOURCES = [
-  { key: 'fangraphs', label: 'FanGraphs Projections' },
+  { key: 'razzball', label: 'Steamer Projections' },
   { key: 'fangraphs-actual', label: 'FanGraphs Actual' },
   { key: 'savant', label: 'Baseball Savant' },
   { key: 'espn', label: 'ESPN ADP' },

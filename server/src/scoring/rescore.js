@@ -63,6 +63,20 @@ function upsertPlayers(db, pitcherScores, batterScores) {
   const fgBatters = db.prepare('SELECT name, team, fg_id FROM batters_raw WHERE fg_id IS NOT NULL').all();
   for (const r of fgBatters) updateFgId.run(r.fg_id, r.name, r.team);
 
+  // Populate mlbam_id from the raw projection tables. Razzball ships an MLBAM id
+  // per row; FanGraphs never did, which left ~40 ranked players with no mlbam_id
+  // and therefore no playing-time projection at all (the planning pipeline joins
+  // on it). Matched on name+team first since that's the stronger signal, then by
+  // name alone. Both only fill NULLs, so an id already established elsewhere wins.
+  const updateMlbamByNameTeam = db.prepare(
+    'UPDATE players SET mlbam_id = ? WHERE name = ? AND team = ? AND mlbam_id IS NULL'
+  );
+  for (const table of ['pitchers_raw', 'batters_raw']) {
+    const rows = db.prepare(`SELECT name, team, mlbam_id FROM ${table} WHERE mlbam_id IS NOT NULL`).all();
+    for (const r of rows) updateMlbamByNameTeam.run(r.mlbam_id, r.name, r.team);
+    for (const r of rows) updateMlbamByName.run(r.mlbam_id, r.name);
+  }
+
   // Populate mlbam_id from statcast
   const statcast = db.prepare('SELECT DISTINCT player_name, player_id FROM statcast_pitches WHERE player_id IS NOT NULL').all();
   for (const r of statcast) updateMlbamByName.run(r.player_id, r.player_name);

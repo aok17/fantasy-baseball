@@ -39,6 +39,10 @@ export function createDb(dbPath) {
   try { db.exec('ALTER TABLE position_eligibility ADD COLUMN player_id INTEGER REFERENCES players(id)'); } catch (e) { /* already exists */ }
   try { db.exec('ALTER TABLE combined_rankings ADD COLUMN pos_rank INTEGER'); } catch (e) { /* already exists */ }
 
+  // Razzball publishes MLBAM ids alongside its projections; FanGraphs did not.
+  try { db.exec('ALTER TABLE pitchers_raw ADD COLUMN mlbam_id TEXT'); } catch (e) { /* already exists */ }
+  try { db.exec('ALTER TABLE batters_raw ADD COLUMN mlbam_id TEXT'); } catch (e) { /* already exists */ }
+
   // Migrate player_notes from name-keyed to player_id-keyed
   try {
     const hasNameCol = db.prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('player_notes') WHERE name = 'name'").get();
