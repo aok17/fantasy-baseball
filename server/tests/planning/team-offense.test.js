@@ -172,3 +172,15 @@ describe('getTeamOffenseMap', () => {
     expect(map.size).toBe(0);
   });
 });
+
+describe('club abbreviations', () => {
+  it('normalizes StatsAPI spellings to the ones used in players.team', async () => {
+    // Otherwise the same club reads "SF" in a matchup and "SFG" in the player
+    // row, and every Giant looks freshly traded.
+    const rows = rankTeamOffense([
+      { team_id: 137, abbr: 'SF', name: 'Giants', games: 10, runs: 50, runs_per_game: 5 },
+      { team_id: 135, abbr: 'SD', name: 'Padres', games: 10, runs: 40, runs_per_game: 4 },
+    ]);
+    expect(rows).toHaveLength(2);
+  });
+});

@@ -6,6 +6,8 @@
 //   /api/v1/teams?sportId=1&season=Y
 //     -> json.teams[] each { id, name, abbreviation }
 
+import { toFgAbbrev } from './team-abbrev.js';
+
 const TEAM_STATS_BASE = 'https://statsapi.mlb.com/api/v1/teams/stats';
 const TEAMS_BASE = 'https://statsapi.mlb.com/api/v1/teams';
 
@@ -22,10 +24,13 @@ export async function fetchTeamOffense(season) {
   if (!teamsRes.ok) throw new Error(`Teams fetch failed: ${teamsRes.status}`);
   const teamsJson = await teamsRes.json();
 
+  // Normalize to the abbreviations the rest of the app uses (players.team is
+  // FanGraphs-style), or the same club reads as "SF" here and "SFG" in the
+  // player row — which also made every Giant look like he'd just been traded.
   const metaById = new Map();
   for (const t of teamsJson.teams || []) {
     if (t?.id == null) continue;
-    metaById.set(Number(t.id), { abbr: t.abbreviation || null, name: t.name || null });
+    metaById.set(Number(t.id), { abbr: toFgAbbrev(t.abbreviation), name: t.name || null });
   }
 
   const rows = [];
