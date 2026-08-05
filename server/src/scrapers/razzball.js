@@ -18,8 +18,20 @@
 
 import { toFgAbbrev } from './team-abbrev.js';
 
-const HITTER_URL = 'https://razzball.com/steamer-hitter-projections/';
-const PITCHER_URL = 'https://razzball.com/steamer-pitcher-projections/';
+// Rest-of-season first, full-season as the fallback. This matters enormously
+// in-season: the full-season pages are the PRESEASON projection, so in August
+// they still had Aaron Judge down for 634 PA when he'd actually taken 261, and
+// Skubal for 175 IP against 103 thrown. Ranking off those is ranking off March.
+// The FanGraphs fetch this replaced preferred ROS the same way ("rsteamer").
+// The fallback matters before opening day, when ROS doesn't exist yet.
+const HITTER_URLS = [
+  'https://razzball.com/restofseason-hitterprojections/',
+  'https://razzball.com/steamer-hitter-projections/',
+];
+const PITCHER_URLS = [
+  'https://razzball.com/restofseason-pitcherprojections/',
+  'https://razzball.com/steamer-pitcher-projections/',
+];
 
 // Shared with the StatsAPI actuals scraper — see team-abbrev.js for why.
 export const normalizeTeam = toFgAbbrev;
@@ -140,6 +152,21 @@ async function getHtml(url) {
   return res.text();
 }
 
+// First URL that yields a usable table wins. Returns { rows, url }.
+async function firstUsable(urls) {
+  const problems = [];
+  for (const url of urls) {
+    try {
+      const { rows } = parseTable(await getHtml(url));
+      if (rows.length) return { rows, url };
+      problems.push(`${url}: no rows`);
+    } catch (e) {
+      problems.push(`${url}: ${e.message}`);
+    }
+  }
+  throw new Error(`No usable Razzball table. ${problems.join('; ')}`);
+}
+
 // Fetch + persist both projection sets. Mirrors fetchFanGraphs(): rewrites the
 // raw tables in one transaction, and refuses to wipe on an empty parse.
 export async function fetchRazzball(db, onProgress) {
@@ -148,13 +175,16 @@ export async function fetchRazzball(db, onProgress) {
     db.prepare("SELECT value FROM app_config WHERE key='fip_constant'").get()?.value ?? 3.15
   );
 
-  progress(0, 2, 'Fetching Razzball pitcher projections...');
-  const pitRows = parseTable(await getHtml(PITCHER_URL)).rows;
-  const pitchers = pitRows.map(r => mapRazzPitcher(r, { fipConstant })).filter(p => p.name);
+  progress(0, 2, 'Fetching rest-of-season pitcher projections...');
+  const pit = await firstUsable(PITCHER_URLS);
+  const pitchers = pit.rows.map(r => mapRazzPitcher(r, { fipConstant })).filter(p => p.name);
 
-  progress(1, 2, 'Fetching Razzball hitter projections...');
-  const batRows = parseTable(await getHtml(HITTER_URL)).rows;
-  const batters = batRows.map(mapRazzBatter).filter(b => b.name);
+  progress(1, 2, 'Fetching rest-of-season hitter projections...');
+  const bat = await firstUsable(HITTER_URLS);
+  const batters = bat.rows.map(mapRazzBatter).filter(b => b.name);
+
+  const restOfSeason = pit.url.includes('restofseason') && bat.url.includes('restofseason');
+  console.log(`Razzball projections: ${restOfSeason ? 'rest-of-season' : 'FULL-SEASON FALLBACK'} (${pit.url}, ${bat.url})`);
 
   if (pitchers.length === 0 && batters.length === 0) {
     console.warn('Razzball returned 0 pitchers and 0 batters — keeping existing data');
@@ -175,5 +205,5 @@ export async function fetchRazzball(db, onProgress) {
   })();
 
   progress(2, 2, 'Done');
-  return { pitchers: pitchers.length, batters: batters.length };
+  return { pitchers: pitchers.length, batters: batters.length, rest_of_season: restOfSeason };
 }
