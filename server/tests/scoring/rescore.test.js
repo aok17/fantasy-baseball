@@ -285,3 +285,45 @@ describe('raw table linkage', () => {
     expect(raw.player_id).toBe(cr.player_id);
   });
 });
+
+describe('merging duplicates respects every foreign key', () => {
+  it('repoints or clears every table referencing players before deleting a row', () => {
+    // A hand-written table list missed batter_game_logs, so the merge died on a
+    // FOREIGN KEY constraint mid-refresh in production and the whole projections
+    // refresh 500'd. Discover the referencing tables from the schema instead,
+    // and prove it by planting a row in EVERY one of them.
+    const db = freshDb();
+    db.pragma('foreign_keys = ON');
+    db.prepare('INSERT INTO players (name, team) VALUES (?, NULL)').run('Split Guy');
+    db.prepare('INSERT INTO players (name, team) VALUES (?, NULL)').run('Split Guy');
+    const [keep, dup] = db.prepare("SELECT id FROM players WHERE name='Split Guy' ORDER BY id").all().map(r => r.id);
+
+    const referencing = [];
+    for (const t of db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()) {
+      for (const fk of db.prepare(`PRAGMA foreign_key_list(${t.name})`).all()) {
+        if (fk.table === 'players') { referencing.push({ table: t.name, column: fk.from }); break; }
+      }
+    }
+    expect(referencing.length).toBeGreaterThan(10);
+
+    // Plant a row pointing at the duplicate in each referencing table.
+    for (const { table, column } of referencing) {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+      const need = cols.filter(c => c.notnull && !c.pk && c.name !== column);
+      const names = [column, ...need.map(c => c.name)];
+      const vals = [dup, ...need.map(c => (/INT|REAL/i.test(c.type) ? 1 : 'x'))];
+      db.prepare(`INSERT INTO ${table} (${names.join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...vals);
+    }
+
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Split Guy', NULL, 5,5,30,2,1,3,0,0,25,12,3,28,9)`).run();
+
+    expect(() => rescoreAll(db)).not.toThrow();
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name='Split Guy'").get().n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) n FROM players WHERE id = ?').get(dup).n).toBe(0);
+    // Nothing may still point at the deleted row.
+    for (const { table, column } of referencing) {
+      expect(db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE ${column} = ?`).get(dup).n).toBe(0);
+    }
+  });
+});

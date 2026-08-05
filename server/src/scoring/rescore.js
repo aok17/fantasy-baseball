@@ -125,13 +125,20 @@ function canonicalizeNames(db, ...rowSets) {
   return renamed;
 }
 
-// Every table that points at players.id, for the merge below.
-const PLAYER_FK_TABLES = [
-  'pitchers_raw', 'batters_raw', 'pitchers_actual', 'batters_actual',
-  'pitcher_scores', 'batter_scores', 'combined_rankings', 'injuries',
-  'espn_rank', 'position_eligibility', 'savant_expected', 'pitcher_model',
-  'playing_time_projection', 'projected_start', 'pitcher_starts', 'player_notes',
-];
+// Every table pointing at players.id, discovered from the schema rather than
+// hardcoded — a hand-written list missed batter_game_logs and the merge below
+// then died on a FOREIGN KEY constraint mid-refresh.
+function playerFkTables(db) {
+  const out = [];
+  for (const t of db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()) {
+    try {
+      for (const fk of db.prepare(`PRAGMA foreign_key_list(${t.name})`).all()) {
+        if (fk.table === 'players') { out.push({ table: t.name, column: fk.from }); break; }
+      }
+    } catch (e) { /* not introspectable */ }
+  }
+  return out;
+}
 
 // Collapse duplicate players rows that share a name and have NO club.
 //
@@ -148,15 +155,17 @@ function mergeDuplicatePlayers(db) {
   `).all();
   if (!groups.length) return 0;
 
+  const fks = playerFkTables(db);
   const dupsOf = db.prepare('SELECT id FROM players WHERE name = ? AND team IS NULL AND id != ?');
   let merged = 0;
   for (const g of groups) {
     for (const d of dupsOf.all(g.name, g.keep)) {
-      for (const t of PLAYER_FK_TABLES) {
+      for (const { table, column } of fks) {
         // OR IGNORE: a table with a unique player_id (player_notes) may already
-        // hold a row for the surviving id; the loser is dropped next.
-        try { db.prepare(`UPDATE OR IGNORE ${t} SET player_id = ? WHERE player_id = ?`).run(g.keep, d.id); } catch (e) { /* table may not exist */ }
-        try { db.prepare(`DELETE FROM ${t} WHERE player_id = ?`).run(d.id); } catch (e) { /* table may not exist */ }
+        // hold a row for the surviving id; the loser is dropped next so no
+        // reference to the deleted row survives.
+        db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`).run(g.keep, d.id);
+        db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(d.id);
       }
       db.prepare('DELETE FROM players WHERE id = ?').run(d.id);
       merged++;
