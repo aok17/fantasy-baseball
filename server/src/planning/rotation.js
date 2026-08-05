@@ -75,10 +75,21 @@ export function projectTeamRotation(pastStarts, futureGames, opts = {}) {
   // Mutable queue of { mlbam, lastStart }; "most due" = smallest lastStart.
   const queue = members.filter(m => !departed.has(m.mlbam)).map(m => ({ ...m }));
 
-  const pickNextDue = () => {
-    // queue is kept sorted asc by lastStart; first non-injured is most due.
+  // No starter goes on fewer than three days' rest. Without this the queue is
+  // the only limit, so a rotation thinned by injuries or trades cycles fast
+  // enough to hand one arm three starts in a week — Landen Roupp drew three in
+  // the Aug 24 week. A four-day minimum gap caps any seven-day span at two.
+  const MIN_REST_DAYS = 3;
+  const daysBetween = (a, b) =>
+    Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+
+  const pickNextDue = (gameDate) => {
+    // queue is kept sorted asc by lastStart; first eligible is most due.
     for (let i = 0; i < queue.length; i++) {
-      if (!injured.has(queue[i].mlbam)) return queue[i];
+      const q = queue[i];
+      if (injured.has(q.mlbam)) continue;
+      if (q.lastStart && daysBetween(q.lastStart, gameDate) <= MIN_REST_DAYS) continue;
+      return q;
     }
     return null;
   };
@@ -104,7 +115,7 @@ export function projectTeamRotation(pastStarts, futureGames, opts = {}) {
       continue;
     }
 
-    const due = pickNextDue();
+    const due = pickNextDue(g.game_date);
     if (!due) {
       out.push({ game_pk: g.game_pk, game_date: g.game_date, sp_mlbam: null, confidence: 'projected' });
       continue;

@@ -388,7 +388,11 @@ export default function Planning() {
                         {p.injury && <span className="text-[10px] px-1 rounded bg-red-100 text-red-600">IL</span>}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <span>{p.position} · {p.team}</span>
+                        {/* mlb_team comes from the club he's actually projected
+                            to start for; p.team goes stale after a trade. */}
+                        <span title={p.mlb_team && p.mlb_team !== p.team ? `Listed as ${p.team}; now with ${p.mlb_team}` : undefined}>
+                          {p.position} · {p.mlb_team || p.team}
+                        </span>
                         {p.fantasy_team && p.fantasy_team !== 'me' && (
                           <span className="text-[10px] px-1 rounded bg-gray-200 text-gray-600 truncate max-w-[110px]"
                             title={`Rostered by ${p.fantasy_team}`}>

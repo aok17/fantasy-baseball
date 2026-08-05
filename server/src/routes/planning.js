@@ -54,14 +54,23 @@ export function createPlanningRouter(db) {
     // a missing team degrades to null offense fields but the opponent id (and
     // therefore the start itself) is always emitted.
     const offense = getTeamOffenseMap(db);
+    const clubOf = new Map(); // player_id -> club abbreviation from his projected starts
     const startsByPlayerWeek = new Map(); // `${player_id}|${week_index}` -> starts[]
     const startRows = db.prepare(`
-      SELECT player_id, week_index, game_pk, game_date, opp_team_id, is_home, confidence
+      SELECT player_id, week_index, game_pk, game_date, team_id, opp_team_id, is_home, confidence
       FROM projected_start
       ORDER BY game_date, game_pk
     `).all();
     for (const s of startRows) {
       const key = `${s.player_id}|${s.week_index}`;
+      // combined_rankings.team goes stale after a trade — Dean Kremer was still
+      // listed on BAL while projected to start against them. His projected
+      // starts carry the club he actually pitches for, so record it here and
+      // prefer it downstream.
+      if (s.team_id != null && !clubOf.has(s.player_id)) {
+        const own = offense.get(s.team_id);
+        if (own?.abbr) clubOf.set(s.player_id, own.abbr);
+      }
       let arr = startsByPlayerWeek.get(key);
       if (!arr) { arr = []; startsByPlayerWeek.set(key, arr); }
       const off = s.opp_team_id != null ? offense.get(s.opp_team_id) : null;
@@ -91,6 +100,7 @@ export function createPlanningRouter(db) {
           name: row.name,
           position: row.position,
           team: row.team,
+          mlb_team: null, // real club, filled from projected starts below
           rank: row.rank ?? null,
           player_type: row.player_type,
           bat_hand: row.bat_hand,
@@ -128,6 +138,10 @@ export function createPlanningRouter(db) {
     }
 
     const players = [...byPlayer.values()];
+    for (const p of players) {
+      const club = clubOf.get(p.player_id);
+      if (club) p.mlb_team = club;
+    }
     players.sort((a, b) => {
       const ar = a.rank ?? UNRANKED;
       const br = b.rank ?? UNRANKED;

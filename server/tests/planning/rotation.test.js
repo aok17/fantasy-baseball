@@ -191,3 +191,55 @@ describe('traded pitchers', () => {
     expect(new Set(out.map(a => a.sp_mlbam)).size).toBe(4);
   });
 });
+
+describe('minimum rest', () => {
+  // Without a rest floor the queue length is the only limit, so a rotation
+  // thinned by injuries or trades cycles fast enough to hand one arm three
+  // starts in a week. Landen Roupp drew three in the Aug 24 week.
+  const past = [
+    { game_date: '2026-08-01', sp_mlbam: 'a' },
+    { game_date: '2026-08-02', sp_mlbam: 'b' },
+    { game_date: '2026-08-03', sp_mlbam: 'c' },
+    { game_date: '2026-08-04', sp_mlbam: 'a' },
+  ];
+  const week = ['2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08', '2026-08-09', '2026-08-10', '2026-08-11']
+    .map((d, i) => ({ game_pk: i, game_date: d, announced_sp: null }));
+
+  it('never gives anyone three starts in a seven-day week', () => {
+    const out = projectTeamRotation(past, week, {});
+    const counts = {};
+    for (const a of out) if (a.sp_mlbam) counts[a.sp_mlbam] = (counts[a.sp_mlbam] || 0) + 1;
+    expect(Math.max(...Object.values(counts))).toBeLessThanOrEqual(2);
+  });
+
+  it('keeps at least four days between a pitcher\'s starts', () => {
+    const out = projectTeamRotation(past, week, {});
+    const byArm = {};
+    for (const a of out) if (a.sp_mlbam) (byArm[a.sp_mlbam] ||= []).push(a.game_date);
+    for (const dates of Object.values(byArm)) {
+      for (let i = 1; i < dates.length; i++) {
+        const gap = (Date.parse(dates[i]) - Date.parse(dates[i - 1])) / 86400000;
+        expect(gap).toBeGreaterThan(3);
+      }
+    }
+  });
+
+  it('leaves a game unprojected rather than starting someone on short rest', () => {
+    // One healthy arm, seven straight games: he takes what he can and the rest
+    // become bullpen games instead of impossible turns.
+    const solo = [{ game_date: '2026-08-04', sp_mlbam: 'only' }];
+    const out = projectTeamRotation(solo, week, {});
+    expect(out.filter(a => a.sp_mlbam === 'only').length).toBeLessThanOrEqual(2);
+    expect(out.some(a => a.sp_mlbam === null)).toBe(true);
+  });
+
+  it('still honours an announced probable on short rest', () => {
+    // An announced start is ground truth, whatever the rest math says.
+    const games = [
+      { game_pk: 1, game_date: '2026-08-05', announced_sp: 'a' },
+      { game_pk: 2, game_date: '2026-08-06', announced_sp: 'a' },
+    ];
+    const out = projectTeamRotation(past, games, {});
+    expect(out.every(a => a.sp_mlbam === 'a' && a.confidence === 'announced')).toBe(true);
+  });
+});
