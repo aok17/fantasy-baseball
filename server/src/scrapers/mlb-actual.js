@@ -16,6 +16,7 @@
 // returns natively and is far stronger than the old fg_id/name matching.
 
 import { toFgAbbrev } from './team-abbrev.js';
+import { normalizeName } from '../planning/player-link.js';
 
 const STATS_BASE = 'https://statsapi.mlb.com/api/v1/stats';
 const TEAMS_BASE = 'https://statsapi.mlb.com/api/v1/teams';
@@ -132,11 +133,30 @@ export async function fetchMlbActual(db, onProgress) {
     return { pitchers: 0, batters: 0, skipped: true };
   }
 
-  // MLBAM id -> players.id, so actuals link by id instead of by name.
-  const byMlbam = new Map(
-    db.prepare('SELECT id, mlbam_id FROM players WHERE mlbam_id IS NOT NULL').all()
-      .map(r => [String(r.mlbam_id), r.id])
-  );
+  // MLBAM id -> players.id, so actuals link by id instead of by name. But only
+  // ~87% of players have an mlbam_id (Razzball ships a FanGraphs id for
+  // longer-tenured players, which we refuse to treat as MLBAM), and linking by
+  // id alone stranded the rest — Chris Sale, deGrom, Wheeler and Gausman all
+  // showed blank season stats. Fall back to a normalized name match, preferring
+  // name+team and accepting name alone only when it identifies one player.
+  const allPlayers = db.prepare('SELECT id, name, team, mlbam_id FROM players').all();
+  const byMlbam = new Map();
+  const byNameTeam = new Map();
+  const byName = new Map(); // normname -> id, or null when ambiguous
+  for (const p of allPlayers) {
+    if (p.mlbam_id) byMlbam.set(String(p.mlbam_id), p.id);
+    const k = normalizeName(p.name);
+    if (!k) continue;
+    byNameTeam.set(`${k}|${p.team}`, p.id);
+    byName.set(k, byName.has(k) && byName.get(k) !== p.id ? null : p.id);
+  }
+  const resolve = (row) => {
+    const byId = row.mlbam_id ? byMlbam.get(row.mlbam_id) : null;
+    if (byId) return byId;
+    const k = normalizeName(row.name);
+    if (!k) return null;
+    return byNameTeam.get(`${k}|${row.team}`) ?? byName.get(k) ?? null;
+  };
   // Quality starts, recovered per player from the Savant-derived start log.
   const qsByPlayer = new Map(
     db.prepare('SELECT player_id, SUM(qs) qs FROM pitcher_starts WHERE player_id IS NOT NULL GROUP BY player_id')
@@ -148,7 +168,7 @@ export async function fetchMlbActual(db, onProgress) {
     db.prepare('DELETE FROM pitchers_actual').run();
     const insP = db.prepare(`INSERT INTO pitchers_actual (player_id, name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB, WHIP, K9, BB9, ERA, FIP, WAR, RA9WAR, fg_id) VALUES (@player_id, @name, @team, @GS, @G, @IP, @W, @L, @QS, @SV, @HLD, @H, @ER, @HR, @SO, @BB, @WHIP, @K9, @BB9, @ERA, @FIP, @WAR, @RA9WAR, @fg_id)`);
     for (const p of pitchers) {
-      const player_id = byMlbam.get(p.mlbam_id) ?? null;
+      const player_id = resolve(p);
       if (player_id) linked++;
       const { mlbam_id, ...row } = p;
       insP.run({ ...row, player_id, QS: player_id ? (qsByPlayer.get(player_id) ?? 0) : 0 });
@@ -157,7 +177,7 @@ export async function fetchMlbActual(db, onProgress) {
     db.prepare('DELETE FROM batters_actual').run();
     const insB = db.prepare(`INSERT INTO batters_actual (player_id, name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS, AVG, OBP, SLG, OPS, wOBA, wRC, BsR, Fld, Off, Def, WAR, fg_id) VALUES (@player_id, @name, @team, @G, @PA, @AB, @H, @2B, @3B, @HR, @R, @RBI, @BB, @SO, @HBP, @SB, @CS, @AVG, @OBP, @SLG, @OPS, @wOBA, @wRC, @BsR, @Fld, @Off, @Def, @WAR, @fg_id)`);
     for (const b of batters) {
-      const player_id = byMlbam.get(b.mlbam_id) ?? null;
+      const player_id = resolve(b);
       if (player_id) linked++;
       const { mlbam_id, ...row } = b;
       insB.run({ ...row, player_id });

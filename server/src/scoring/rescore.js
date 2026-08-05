@@ -55,10 +55,9 @@ function getEspnRank(db) {
 // Rewrite incoming names onto the spelling already on file before anything is
 // keyed by name. Ambiguous names (two players sharing one normalized form on
 // different clubs) are left alone rather than risk merging two people.
-function canonicalizeNames(db, ...rowSets) {
+function buildCanonMaps(db) {
   const existing = db.prepare('SELECT name, team FROM players').all();
-  if (!existing.length) return 0;
-
+  if (!existing.length) return null;
   const byNameTeam = new Map(); // "normname|team" -> canonical spelling
   const byName = new Map();     // "normname" -> { name, team }, or null if ambiguous
   for (const p of existing) {
@@ -68,24 +67,102 @@ function canonicalizeNames(db, ...rowSets) {
     const prev = byName.get(k);
     byName.set(k, byName.has(k) && prev?.name !== p.name ? null : { name: p.name, team: p.team });
   }
+  return { byNameTeam, byName };
+}
 
+// The canonical (name, team) for one feed row, or null if it's already right.
+function canonicalFor(maps, name, team) {
+  const k = normalizeName(name);
+  if (!k) return null;
+  const sole = maps.byName.get(k) || null;
+  const canonName = maps.byNameTeam.get(`${k}|${team}`) ?? sole?.name ?? name;
+  // A feed that lists someone as a free agent (Razzball's "FA" -> null club)
+  // would otherwise insert a second, teamless row for a player already on file:
+  // SQLite treats NULLs as distinct in UNIQUE(name, team), so the upsert can't
+  // collapse them. Adopt the club already on record instead.
+  const canonTeam = team == null && sole?.team != null ? sole.team : team;
+  if (canonName === name && canonTeam === team) return null;
+  return { name: canonName, team: canonTeam };
+}
+
+// Rewrite the raw projection tables onto the spellings already in players.
+//
+// This has to happen in the TABLES, not just in the in-memory score arrays.
+// Renaming only the arrays left pitchers_raw/batters_raw holding the feed's
+// accent-stripped spelling, so the player_id backfill — which matches on exact
+// name — never matched, and the rankings query then LEFT JOINed those rows to
+// nothing. Every accented player (José Ramírez, Ronald Acuña Jr., Jesús
+// Luzardo — 95 of them) appeared in the rankings with every stat column blank.
+function canonicalizeRawTables(db) {
+  const maps = buildCanonMaps(db);
+  if (!maps) return 0;
+  let renamed = 0;
+  for (const table of ['pitchers_raw', 'batters_raw']) {
+    const upd = db.prepare(`UPDATE ${table} SET name = ?, team = ? WHERE id = ?`);
+    for (const r of db.prepare(`SELECT id, name, team FROM ${table}`).all()) {
+      const canon = canonicalFor(maps, r.name, r.team);
+      if (canon) { upd.run(canon.name, canon.team, r.id); renamed++; }
+    }
+  }
+  return renamed;
+}
+
+// Safety net for score arrays built before the tables were canonicalized.
+function canonicalizeNames(db, ...rowSets) {
+  const maps = buildCanonMaps(db);
+  if (!maps) return 0;
   let renamed = 0;
   for (const rows of rowSets) {
     for (const r of rows) {
       if (!r?.name) continue;
-      const k = normalizeName(r.name);
-      if (!k) continue;
-      const sole = byName.get(k) || null;
-      const canon = byNameTeam.get(`${k}|${r.team}`) ?? sole?.name;
-      if (canon && canon !== r.name) { r.name = canon; renamed++; }
-      // A feed that lists someone as a free agent (Razzball's "FA" -> null club)
-      // would otherwise insert a second, teamless row for a player already on
-      // file: SQLite treats NULLs as distinct in UNIQUE(name, team), so the
-      // upsert can't collapse them. Adopt the club already on record instead.
-      if (r.team == null && sole?.team != null) r.team = sole.team;
+      const canon = canonicalFor(maps, r.name, r.team);
+      if (!canon) continue;
+      r.name = canon.name;
+      r.team = canon.team;
+      renamed++;
     }
   }
   return renamed;
+}
+
+// Every table that points at players.id, for the merge below.
+const PLAYER_FK_TABLES = [
+  'pitchers_raw', 'batters_raw', 'pitchers_actual', 'batters_actual',
+  'pitcher_scores', 'batter_scores', 'combined_rankings', 'injuries',
+  'espn_rank', 'position_eligibility', 'savant_expected', 'pitcher_model',
+  'playing_time_projection', 'projected_start', 'pitcher_starts', 'player_notes',
+];
+
+// Collapse duplicate players rows that share a name and have NO club.
+//
+// UNIQUE(name, team) does not constrain NULL teams in SQLite — two NULLs are
+// never "equal" — so the ON CONFLICT upsert below silently inserted a fresh row
+// for every teamless player on every refresh. The consequences were invisible
+// but severe: pitchers_raw would link to the first row while combined_rankings
+// linked to the last, so the rankings query joined the two halves of the same
+// player to each other and found nothing. Alex Cobb had rows 1157 and 2206.
+function mergeDuplicatePlayers(db) {
+  const groups = db.prepare(`
+    SELECT MIN(id) keep, name, COUNT(*) c FROM players
+    WHERE team IS NULL GROUP BY name HAVING c > 1
+  `).all();
+  if (!groups.length) return 0;
+
+  const dupsOf = db.prepare('SELECT id FROM players WHERE name = ? AND team IS NULL AND id != ?');
+  let merged = 0;
+  for (const g of groups) {
+    for (const d of dupsOf.all(g.name, g.keep)) {
+      for (const t of PLAYER_FK_TABLES) {
+        // OR IGNORE: a table with a unique player_id (player_notes) may already
+        // hold a row for the surviving id; the loser is dropped next.
+        try { db.prepare(`UPDATE OR IGNORE ${t} SET player_id = ? WHERE player_id = ?`).run(g.keep, d.id); } catch (e) { /* table may not exist */ }
+        try { db.prepare(`DELETE FROM ${t} WHERE player_id = ?`).run(d.id); } catch (e) { /* table may not exist */ }
+      }
+      db.prepare('DELETE FROM players WHERE id = ?').run(d.id);
+      merged++;
+    }
+  }
+  return merged;
 }
 
 function upsertPlayers(db, pitcherScores, batterScores) {
@@ -93,10 +170,18 @@ function upsertPlayers(db, pitcherScores, batterScores) {
   const renamed = canonicalizeNames(db, pitcherScores, batterScores);
   if (renamed) console.log(`Canonicalized ${renamed} feed names onto existing players rows`);
 
-  const upsert = db.prepare(`
-    INSERT INTO players (name, team) VALUES (?, ?)
-    ON CONFLICT(name, team) DO UPDATE SET team = excluded.team
-  `);
+  // Null-safe upsert. ON CONFLICT(name, team) cannot fire for a NULL team, so a
+  // blind INSERT duplicated every teamless player on each run; look first.
+  const findPlayer = db.prepare('SELECT id FROM players WHERE name = ? AND team IS ?');
+  const insertPlayer = db.prepare('INSERT INTO players (name, team) VALUES (?, ?)');
+  const upsert = {
+    run: (name, team) => {
+      const t = team ?? null;
+      const found = findPlayer.get(name, t);
+      if (found) return found.id;
+      return Number(insertPlayer.run(name, t).lastInsertRowid);
+    },
+  };
   const updateFgId = db.prepare('UPDATE players SET fg_id = ? WHERE name = ? AND team = ?');
   const updateMlbamByName = db.prepare('UPDATE players SET mlbam_id = ? WHERE name = ? AND mlbam_id IS NULL');
 
@@ -133,20 +218,23 @@ function upsertPlayers(db, pitcherScores, batterScores) {
   const allPlayers = db.prepare('SELECT id, name, team FROM players').all();
   for (const p of allPlayers) idMap[`${p.name}|${p.team}`] = p.id;
 
-  // Populate player_id FK on all satellite tables
+  // Populate player_id FK on all satellite tables. Team comparisons use IS, not
+  // =, because = is never true when either side is NULL — so every teamless
+  // player (a feed's free agents) previously failed to link and joined to
+  // nothing in the rankings query.
   db.exec(`
     UPDATE pitchers_raw SET player_id = (
-      SELECT p.id FROM players p WHERE p.name = pitchers_raw.name AND p.team = pitchers_raw.team
+      SELECT p.id FROM players p WHERE p.name = pitchers_raw.name AND p.team IS pitchers_raw.team
     ) WHERE player_id IS NULL;
     UPDATE batters_raw SET player_id = (
-      SELECT p.id FROM players p WHERE p.name = batters_raw.name AND p.team = batters_raw.team
+      SELECT p.id FROM players p WHERE p.name = batters_raw.name AND p.team IS batters_raw.team
     ) WHERE player_id IS NULL;
     UPDATE espn_rank SET player_id = (
       SELECT p.id FROM players p WHERE p.name = espn_rank.name AND p.team IS NOT NULL
       ORDER BY p.fg_id IS NOT NULL DESC LIMIT 1
     ) WHERE player_id IS NULL;
     UPDATE injuries SET player_id = (
-      SELECT p.id FROM players p WHERE p.name = injuries.name AND p.team = injuries.team
+      SELECT p.id FROM players p WHERE p.name = injuries.name AND p.team IS injuries.team
     ) WHERE player_id IS NULL;
   `);
 
@@ -208,6 +296,17 @@ export function rescoreAll(db) {
     let slots;
     try { slots = JSON.parse(getConfig(db, 'roster_slots') || ''); } catch { slots = null; }
     if (!slots) slots = DEFAULT_SLOTS;
+
+    // Repair any teamless duplicates left by earlier runs before anything reads
+    // players, or the name maps and idMap below inherit the split.
+    const mergedPlayers = mergeDuplicatePlayers(db);
+    if (mergedPlayers) console.log(`Merged ${mergedPlayers} duplicate teamless player rows`);
+
+    // Put the feed's spellings onto the names already on file BEFORE anything
+    // reads these tables, so the score arrays, the player_id backfill and the
+    // rankings joins all agree on one spelling per player.
+    const renamedRaw = canonicalizeRawTables(db);
+    if (renamedRaw) console.log(`Canonicalized ${renamedRaw} raw projection rows onto existing player names`);
 
     // Collapse duplicate rows before anything reads them. Doing this only after
     // player_id is assigned would be too late: the score arrays are built from

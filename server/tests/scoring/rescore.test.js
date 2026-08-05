@@ -223,3 +223,65 @@ describe('duplicate collapsing', () => {
     expect(db.prepare("SELECT team FROM players WHERE name = 'Free Agent Guy'").get().team).toBe('SEA');
   });
 });
+
+describe('raw table linkage', () => {
+  // The rankings query LEFT JOINs the raw tables on player_id. If a raw row
+  // never gets a player_id, the player still appears (combined_rankings is built
+  // from the score array) but every stat column joins to null. 203 rows were in
+  // that state in production, including all 95 accented names.
+  it('links an accent-stripped feed row to the accented player on file', () => {
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, ?)').run('José Ramírez', 'CLE');
+    db.prepare(`INSERT INTO batters_raw (name, team, G, PA, AB, H, "2B", "3B", HR, R, RBI, BB, SO, HBP, SB, CS)
+      VALUES ('Jose Ramirez','CLE',150,600,550,160,30,5,35,95,100,60,130,5,15,3)`).run();
+    rescoreAll(db);
+
+    const raw = db.prepare("SELECT name, player_id FROM batters_raw WHERE name LIKE 'Jos%'").get();
+    const pid = db.prepare("SELECT id FROM players WHERE name = 'José Ramírez'").get().id;
+    expect(raw.name).toBe('José Ramírez'); // the table itself is rewritten
+    expect(raw.player_id).toBe(pid);
+    const cr = db.prepare("SELECT player_id FROM combined_rankings WHERE name = 'José Ramírez'").get();
+    expect(cr.player_id).toBe(pid); // and both halves agree
+  });
+
+  it('links a teamless player, whose team comparison is NULL on both sides', () => {
+    // SQL "=" is never true against NULL, so `p.team = raw.team` silently failed
+    // for every free agent.
+    const db = freshDb();
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Free Arm', NULL, 5,5,30,2,1,3,0,0,25,12,3,28,9)`).run();
+    rescoreAll(db);
+    const raw = db.prepare("SELECT player_id FROM pitchers_raw WHERE name = 'Free Arm'").get();
+    expect(raw.player_id).not.toBeNull();
+    const cr = db.prepare("SELECT player_id FROM combined_rankings WHERE name = 'Free Arm'").get();
+    expect(cr.player_id).toBe(raw.player_id);
+  });
+
+  it('does not create a second teamless row on repeated runs', () => {
+    // UNIQUE(name, team) does not constrain NULL teams, so the old ON CONFLICT
+    // upsert inserted a fresh row every refresh.
+    const db = freshDb();
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Free Arm', NULL, 5,5,30,2,1,3,0,0,25,12,3,28,9)`).run();
+    rescoreAll(db);
+    rescoreAll(db);
+    rescoreAll(db);
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name = 'Free Arm'").get().n).toBe(1);
+  });
+
+  it('merges teamless duplicates left behind by earlier runs', () => {
+    const db = freshDb();
+    db.prepare('INSERT INTO players (name, team) VALUES (?, NULL)').run('Split Guy');
+    db.prepare('INSERT INTO players (name, team) VALUES (?, NULL)').run('Split Guy');
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name = 'Split Guy'").get().n).toBe(2);
+
+    db.prepare(`INSERT INTO pitchers_raw (name, team, GS, G, IP, W, L, QS, SV, HLD, H, ER, HR, SO, BB)
+      VALUES ('Split Guy', NULL, 5,5,30,2,1,3,0,0,25,12,3,28,9)`).run();
+    rescoreAll(db);
+
+    expect(db.prepare("SELECT COUNT(*) n FROM players WHERE name = 'Split Guy'").get().n).toBe(1);
+    const raw = db.prepare("SELECT player_id FROM pitchers_raw WHERE name = 'Split Guy'").get();
+    const cr = db.prepare("SELECT player_id FROM combined_rankings WHERE name = 'Split Guy'").get();
+    expect(raw.player_id).toBe(cr.player_id);
+  });
+});
