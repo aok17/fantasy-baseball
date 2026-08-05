@@ -61,12 +61,19 @@ export function inferRotation(pastStarts, { openerIds = new Set(), injured = new
 // Roll the rotation forward over one team's future games.
 // futureGames: [{ game_pk, game_date, announced_sp }] (announced_sp = mlbam or null), date order.
 // Returns [{ game_pk, game_date, sp_mlbam, confidence }]; sp_mlbam null if unprojectable (bullpen game).
+// opts.departed: pitchers who have since moved to another club. They are removed
+// AFTER the rotation is inferred, never before — dropping their starts from the
+// history would corrupt the cadence walk and shrink the detected rotation size,
+// the same way a missing rain-shortened game did. Without this a traded pitcher
+// stays in his old club's queue while also joining his new one, and the two
+// clubs' schedules stack: Dean Kremer drew three starts in a single week, one of
+// them against Baltimore, the team he was still listed on.
 export function projectTeamRotation(pastStarts, futureGames, opts = {}) {
-  const { openerIds = new Set(), injured = new Set(), rotationSizeDefault = 5 } = opts;
+  const { openerIds = new Set(), injured = new Set(), rotationSizeDefault = 5, departed = new Set() } = opts;
   const { members } = inferRotation(pastStarts, { openerIds, injured, rotationSizeDefault });
 
   // Mutable queue of { mlbam, lastStart }; "most due" = smallest lastStart.
-  const queue = members.map(m => ({ ...m }));
+  const queue = members.filter(m => !departed.has(m.mlbam)).map(m => ({ ...m }));
 
   const pickNextDue = () => {
     // queue is kept sorted asc by lastStart; first non-injured is most due.

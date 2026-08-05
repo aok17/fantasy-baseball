@@ -153,3 +153,41 @@ describe('projectTeamRotation', () => {
     expect(out[0].sp_mlbam).toBeNull();
   });
 });
+
+describe('traded pitchers', () => {
+  // A traded arm keeps appearing in his old club's start history, so he stayed
+  // in that rotation while also joining his new one and the two schedules
+  // stacked: Dean Kremer drew three starts in one week, one of them against
+  // Baltimore, the club he was still listed on.
+  const past = [
+    { game_date: '2026-07-26', sp_mlbam: 'kremer' },
+    { game_date: '2026-07-27', sp_mlbam: 'a' },
+    { game_date: '2026-07-28', sp_mlbam: 'b' },
+    { game_date: '2026-07-29', sp_mlbam: 'c' },
+    { game_date: '2026-07-30', sp_mlbam: 'd' },
+    { game_date: '2026-07-31', sp_mlbam: 'kremer' },
+  ];
+  const future = ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05']
+    .map((d, i) => ({ game_pk: i, game_date: d, announced_sp: null }));
+
+  it('still projects him for his old club when nothing says he left', () => {
+    const out = projectTeamRotation(past, future, {});
+    expect(out.some(a => a.sp_mlbam === 'kremer')).toBe(true);
+  });
+
+  it('drops him from the old club once he belongs elsewhere', () => {
+    const out = projectTeamRotation(past, future, { departed: new Set(['kremer']) });
+    expect(out.some(a => a.sp_mlbam === 'kremer')).toBe(false);
+    expect(out.every(a => a.sp_mlbam)).toBe(true); // the others absorb his turns
+  });
+
+  it('infers rotation size from the full history, not the trimmed queue', () => {
+    // Removing his starts from the history instead would corrupt the cadence
+    // walk and shrink the detected rotation — the same failure mode as a
+    // missing rain-shortened game.
+    const { size } = inferRotation(past, {});
+    expect(size).toBe(5);
+    const out = projectTeamRotation(past, future, { departed: new Set(['kremer']) });
+    expect(new Set(out.map(a => a.sp_mlbam)).size).toBe(4);
+  });
+});

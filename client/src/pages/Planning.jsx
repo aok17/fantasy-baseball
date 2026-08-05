@@ -84,6 +84,36 @@ function applyFilters(players, { rosterFilter, positionFilter, typeFilter, twoSt
   });
 }
 
+// Row shading by who holds the player. fantasy_team === 'me' is the user's own
+// team (set by the roster scraper); falsy means nobody has him. Colour alone
+// isn't enough, so each row also carries a left accent bar and taken players
+// show the rostering team's name.
+const OWNERSHIP = {
+  mine: { row: 'bg-emerald-50', accent: 'border-l-emerald-400', swatch: 'bg-emerald-100 border-emerald-400', label: 'Mine' },
+  taken: { row: 'bg-gray-100', accent: 'border-l-gray-300', swatch: 'bg-gray-100 border-gray-300', label: 'Rostered elsewhere' },
+  fa: { row: 'bg-white', accent: 'border-l-sky-300', swatch: 'bg-white border-sky-300', label: 'Free agent' },
+};
+
+function ownershipOf(p) {
+  if (p.fantasy_team === 'me') return 'mine';
+  if (p.fantasy_team) return 'taken';
+  return 'fa';
+}
+
+function OwnershipLegend() {
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-gray-500 px-1">
+      <span className="font-medium text-gray-600">Roster status</span>
+      {['mine', 'fa', 'taken'].map(k => (
+        <span key={k} className="flex items-center gap-1">
+          <span className={`inline-block w-4 h-3 rounded-sm border-l-4 ${OWNERSHIP[k].swatch}`} />
+          {OWNERSHIP[k].label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // "2026-06-01" -> "Jun 1"
 function shortDate(iso) {
   if (!iso) return '';
@@ -301,6 +331,7 @@ export default function Planning() {
         </span>
       </div>
 
+      {!loading && !error && players.length > 0 && <OwnershipLegend />}
       {hasMatchups && showMatchups && !loading && !error && <MatchupLegend />}
 
       {loading && <div className="p-4 text-gray-500">Loading projections...</div>}
@@ -341,11 +372,14 @@ export default function Planning() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((p, i) => {
-                const rowBg = i % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+              {shown.map((p) => {
+                const own = OWNERSHIP[ownershipOf(p)];
+                // Sticky cells must carry the background themselves or the rows
+                // beneath show through as they scroll under.
+                const rowBg = own.row;
                 return (
-                  <tr key={p.player_id} className="group">
-                    <td className={`sticky left-0 z-10 border-b border-gray-100 px-2 py-1 text-gray-400 tabular-nums group-hover:bg-blue-50 ${rowBg}`}>
+                  <tr key={p.player_id} className={`group ${rowBg}`}>
+                    <td className={`sticky left-0 z-10 border-b border-gray-100 border-l-4 ${own.accent} px-2 py-1 text-gray-400 tabular-nums group-hover:bg-blue-50 ${rowBg}`}>
                       {p.rank ?? <span className="text-gray-300" title="No combined ranking">–</span>}
                     </td>
                     <td className={`sticky left-12 z-10 border-b border-r border-gray-100 px-3 py-1 group-hover:bg-blue-50 ${rowBg}`}>
@@ -355,6 +389,12 @@ export default function Planning() {
                       </div>
                       <div className="flex items-center gap-2 text-xs text-gray-400">
                         <span>{p.position} · {p.team}</span>
+                        {p.fantasy_team && p.fantasy_team !== 'me' && (
+                          <span className="text-[10px] px-1 rounded bg-gray-200 text-gray-600 truncate max-w-[110px]"
+                            title={`Rostered by ${p.fantasy_team}`}>
+                            {p.fantasy_team}
+                          </span>
+                        )}
                         <PlatoonBadge player={p} />
                       </div>
                     </td>

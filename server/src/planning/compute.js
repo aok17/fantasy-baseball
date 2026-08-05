@@ -216,18 +216,48 @@ export function computeProjections(db, { games, handMap, ilIntervals = new Map()
   // club he does it for. This is the real pitcher universe — it includes the
   // streamers, call-ups and back-end starters that combined_rankings omits.
   const scheduleTeamOf = new Map();         // mlbam -> team_id
+  // Which club each pitcher belongs to NOW. A traded arm keeps appearing in his
+  // old club's start history, so without this he stays in that rotation while
+  // also joining his new one and the two schedules stack into impossible weeks.
+  const lastStartTeam = new Map(); // mlbam -> { team_id, game_date }
+  for (const [tid, starts] of teamPastStarts) {
+    for (const s of starts) {
+      if (!s.sp_mlbam) continue;
+      const cur = lastStartTeam.get(s.sp_mlbam);
+      if (!cur || s.game_date > cur.game_date) {
+        lastStartTeam.set(s.sp_mlbam, { team_id: tid, game_date: s.game_date });
+      }
+    }
+  }
+  // currentTeam from the people API is authoritative when it names a real MLB
+  // club (it reports a minor-league affiliate for rehab/optioned players); the
+  // club he most recently started for is the fallback.
+  const currentClubOf = (mlbam) => {
+    const t = handMap.get(mlbam)?.mlb_team_id ?? null;
+    if (t != null && validMlbTeamIds.has(t)) return t;
+    return lastStartTeam.get(mlbam)?.team_id ?? lastMlbClub.get(mlbam)?.team_id ?? null;
+  };
+
   for (const [teamId, future] of teamFutureGames) {
     const past = teamPastStarts.get(teamId) || [];
+    // Only pitchers whose club is known to be elsewhere are dropped; an unknown
+    // club leaves him where his starts put him.
+    const departed = new Set();
+    for (const s of past) {
+      if (!s.sp_mlbam) continue;
+      const club = currentClubOf(s.sp_mlbam);
+      if (club != null && club !== teamId) departed.add(s.sp_mlbam);
+    }
     // Members of the inferred active rotation count too: in a 5-game week a
     // 6-man rotation leaves someone without a turn, and he still belongs on the
     // board (with 0 starts) rather than vanishing.
     for (const m of inferRotation(past, { openerIds, injured, rotationSizeDefault }).members) {
-      if (m.mlbam && !scheduleTeamOf.has(m.mlbam)) scheduleTeamOf.set(m.mlbam, teamId);
+      if (m.mlbam && !departed.has(m.mlbam) && !scheduleTeamOf.has(m.mlbam)) scheduleTeamOf.set(m.mlbam, teamId);
     }
     // The rotation engine only echoes back game_pk/game_date, so re-join to the
     // schedule entries to recover the opponent and home/away for each turn.
     const futureByPk = new Map(future.map(f => [f.game_pk, f]));
-    const assigns = projectTeamRotation(past, future, { openerIds, injured, rotationSizeDefault });
+    const assigns = projectTeamRotation(past, future, { openerIds, injured, rotationSizeDefault, departed });
     for (const a of assigns) {
       projectedSpByGameTeam.set(`${a.game_pk}|${teamId}`, { sp: a.sp_mlbam, confidence: a.confidence });
       if (!a.sp_mlbam) continue;
